@@ -218,7 +218,7 @@ class OtimizadorApp(ctk.CTk):
         
         self.current_lang = "pt"
 
-        self.title("Bernal Otimizações PRO - V9.2 (Edição Definitiva)")
+        self.title("Bernal Otimizações PRO - V9.3 (Edição Definitiva)")
         sw = self.winfo_screenwidth()
         sh = self.winfo_screenheight()
         w, h = 1220, 760
@@ -299,7 +299,7 @@ class OtimizadorApp(ctk.CTk):
                                    font=("Arial", 52), fill="#00d4ff")
         title = canvas.create_text(w//2, 160, text="Bernal Otimizações Pro",
                                     font=("Arial", 20, "bold"), fill="white")
-        subtitle = canvas.create_text(w//2, 190, text="Versão 9.2  •  Performance Máxima Definitiva",
+        subtitle = canvas.create_text(w//2, 190, text="Versão 9.3  •  Performance Máxima Definitiva",
                                        font=("Arial", 11), fill="#00D2FF")
         status = canvas.create_text(w//2, 240, text="Iniciando...",
                                      font=("Arial", 10), fill="#00d4ff")
@@ -836,7 +836,9 @@ class OtimizadorApp(ctk.CTk):
                         g_short = gpu.replace("(R)", "").replace("(TM)", "").strip()
                         self.lbl_chip_gpu_name.configure(text=g_short[:22])
                     if hasattr(self, 'lbl_chip_ram_val') and self.lbl_chip_ram_val.winfo_exists():
-                        self.lbl_chip_ram_val.configure(text=f"{ram_gb} GB RAM")
+                        alloc = getattr(self, 'allocated_vram', 0)
+                        txt = f"{ram_gb} GB + {alloc}GB Virt" if alloc else f"{ram_gb} GB RAM"
+                        self.lbl_chip_ram_val.configure(text=txt)
                     if hasattr(self, 'lbl_chip_disk_val') and self.lbl_chip_disk_val.winfo_exists():
                         try:
                             import psutil
@@ -1108,7 +1110,7 @@ class OtimizadorApp(ctk.CTk):
         # Inicia Telemetria ao vivo no Painel (Relógio, Uptime, CPU/RAM/GPU temps & uso)
         self.init_telemetry_hud()
 
-        self.log("Aplicativo Inicializado V9.2.")
+        self.log("Aplicativo Inicializado V9.3.")
         self.log("Aguardando leitura de Hardware...")
 
         # Verificação silenciosa de atualização na nuvem (GitHub)
@@ -1132,7 +1134,7 @@ class OtimizadorApp(ctk.CTk):
 
         ctk.CTkLabel(
             brand_frame,
-            text="v9.2 Oficial • Painel Gamer Pro",
+            text="v9.3 Oficial • Painel Gamer Pro",
             font=ctk.CTkFont(family="Arial", size=11),
             text_color="#8E8AA0"
         ).pack(side="left")
@@ -1216,7 +1218,7 @@ class OtimizadorApp(ctk.CTk):
         req = urllib.request.Request(
             api_url,
             headers={
-                "User-Agent": "BernalOtimizacoes-AutoUpdater/9.2",
+                "User-Agent": "BernalOtimizacoes-AutoUpdater/9.3",
                 "Accept": "application/vnd.github.v3+json"
             }
         )
@@ -1254,7 +1256,7 @@ class OtimizadorApp(ctk.CTk):
                         break
 
             remote_ver = self.parse_version_tuple(tag_name)
-            local_ver = self.parse_version_tuple("9.2")
+            local_ver = self.parse_version_tuple("9.3")
 
             if remote_ver > local_ver and download_url:
                 self.log(f"🚀 Nova versão encontrada na nuvem: {tag_name}!")
@@ -1270,7 +1272,7 @@ class OtimizadorApp(ctk.CTk):
                 if manual:
                     self.after(0, lambda: messagebox.showinfo(
                         "Atualizações",
-                        f"✅ Você já está utilizando a versão mais recente!\n\nVersão instalada: V9.2 PRO Oficial\nServidor: Nuvem GitHub sincronizada."
+                        f"✅ Você já está utilizando a versão mais recente!\n\nVersão instalada: V9.3 PRO Oficial\nServidor: Nuvem GitHub sincronizada."
                     ))
         except urllib.error.HTTPError as e:
             if e.code == 404:
@@ -1278,7 +1280,7 @@ class OtimizadorApp(ctk.CTk):
                 if manual:
                     self.after(0, lambda: messagebox.showinfo(
                         "Nenhuma Atualização",
-                        "✅ O sistema está na versão mais atual (V9.2 PRO)!\n\nNenhuma atualização mais recente foi publicada pelo administrador ainda."
+                        "✅ O sistema está na versão mais atual (V9.3 PRO)!\n\nNenhuma atualização mais recente foi publicada pelo administrador ainda."
                     ))
             else:
                 if manual:
@@ -1304,7 +1306,7 @@ class OtimizadorApp(ctk.CTk):
 
         ctk.CTkLabel(body, text="🚀 NOVA ATUALIZAÇÃO DISPONÍVEL!", font=ctk.CTkFont(size=16, weight="bold"), text_color="#00D2FF").pack(pady=(18, 4))
         
-        tag = info.get("tag", "V9.3")
+        tag = info.get("tag", "V9.4")
         sz = info.get("size_mb", 0.0)
         sz_str = f" • {sz:.1f} MB" if sz > 0 else ""
         
@@ -1313,7 +1315,7 @@ class OtimizadorApp(ctk.CTk):
         
         ctk.CTkLabel(
             badge_frame,
-            text=f"Versão Atual: V9.2 PRO  ➔  Nova Versão: {tag}{sz_str}",
+            text=f"Versão Atual: V9.3 PRO  ➔  Nova Versão: {tag}{sz_str}",
             font=ctk.CTkFont(size=12, weight="bold"),
             text_color="#10B981"
         ).pack(pady=8)
@@ -1757,7 +1759,7 @@ del "%~f0" >nul 2>&1
         card_ver.pack(fill="x", padx=10, pady=(6, 12))
         ctk.CTkLabel(
             card_ver,
-            text="⚡ VERSÃO 9.2 PRO OFICIAL\nBernal Otimizações © 2026\n● SISTEMA CALIBRADO",
+            text="⚡ VERSÃO 9.3 PRO OFICIAL\nBernal Otimizações © 2026\n● SISTEMA CALIBRADO",
             font=ctk.CTkFont(size=10, weight="bold"),
             text_color="#00D2FF",
             justify="center"
@@ -2021,6 +2023,8 @@ del "%~f0" >nul 2>&1
         h_vr = ctk.CTkFrame(card_vram, fg_color="transparent")
         h_vr.pack(fill="x", padx=14, pady=(10, 4))
         ctk.CTkLabel(h_vr, text="🧠 EXPANSOR DE MEMÓRIA RAM VIRTUAL (ALOCAR HD / SSD)", font=ctk.CTkFont(size=12, weight="bold"), text_color="#00D2FF").pack(side="left")
+        self.lbl_vram_status = ctk.CTkLabel(h_vr, text="● Status: Padrão Windows (Auto)", font=ctk.CTkFont(size=11, weight="bold"), text_color="#10B981")
+        self.lbl_vram_status.pack(side="right")
 
         ctk.CTkLabel(card_vram, text="Aumente a memória RAM alocando espaço de alta velocidade do seu SSD/HD (Pagefile Fixa sem fragmentação).\nEvita fechamentos por falta de memória (Out of Memory) e erros como 0x00001338 no Warzone e GTA V.", font=ctk.CTkFont(size=11), text_color="#9CA3AF", justify="left").pack(anchor="w", padx=14, pady=(0, 8))
 
@@ -2088,9 +2092,9 @@ del "%~f0" >nul 2>&1
             text_color="#9CA3AF"
         ).pack(anchor="w", padx=14, pady=(0, 10))
 
-        # Full Wallpapers Data with Categories
+        # Full Wallpapers Data with Categories (30 Wallpapers 4K)
         self.wallpapers_data = [
-            # 1. Bernal Oficial
+            # 1. Bernal Oficial (5)
             {
                 "id": "bernal_official",
                 "category": "oficial",
@@ -2101,6 +2105,26 @@ del "%~f0" >nul 2>&1
                 "file": "Wallpaper_Bernal.png",
                 "thumb": "thumb_Wallpaper_Bernal.png",
                 "is_default": True
+            },
+            {
+                "id": "bernal_gold",
+                "category": "oficial",
+                "tag": "👑 OFICIAL BERNAL",
+                "tag_color": "#F59E0B",
+                "name": "Bernal VIP Gold Royale",
+                "sub": "Logo Bernal em Ouro 3D e Partículas de Luz",
+                "file": "WP_Bernal_Gold.png",
+                "thumb": "thumb_WP_Bernal_Gold.png"
+            },
+            {
+                "id": "bernal_prism",
+                "category": "oficial",
+                "tag": "👑 OFICIAL BERNAL",
+                "tag_color": "#F59E0B",
+                "name": "Bernal Spectrum Prism",
+                "sub": "Geometria Holográfica e Luz Prismática Ultra HD",
+                "file": "WP_Bernal_Prism.png",
+                "thumb": "thumb_WP_Bernal_Prism.png"
             },
             {
                 "id": "bernal_dark",
@@ -2123,7 +2147,59 @@ del "%~f0" >nul 2>&1
                 "thumb": "thumb_WP_Light.png"
             },
 
-            # 2. Futebol & FIFA
+            # 2. The Last of Us (5)
+            {
+                "id": "last_of_us_main",
+                "category": "lastofus",
+                "tag": "🌿 THE LAST OF US",
+                "tag_color": "#10B981",
+                "name": "The Last of Us - Seattle Overgrown",
+                "sub": "Joel & Ellie na Cidade Alagada com Natureza Pós-Apocalíptica",
+                "file": "WP_LastOfUs.png",
+                "thumb": "thumb_WP_LastOfUs.png"
+            },
+            {
+                "id": "last_of_us_ellie",
+                "category": "lastofus",
+                "tag": "🌿 THE LAST OF US",
+                "tag_color": "#10B981",
+                "name": "The Last of Us - Ellie Acústico",
+                "sub": "Ellie Tocando Violão na Janela ao Pôr do Sol",
+                "file": "WP_LastOfUs_Ellie.png",
+                "thumb": "thumb_WP_LastOfUs_Ellie.png"
+            },
+            {
+                "id": "last_of_us_firefly",
+                "category": "lastofus",
+                "tag": "🌿 THE LAST OF US",
+                "tag_color": "#10B981",
+                "name": "The Last of Us - Fireflies Neon",
+                "sub": "Joel com Lanterna e Grafite Neon dos Vaga-Lumes (Look for the Light)",
+                "file": "WP_LastOfUs_Firefly.png",
+                "thumb": "thumb_WP_LastOfUs_Firefly.png"
+            },
+            {
+                "id": "last_of_us_giraffes",
+                "category": "lastofus",
+                "tag": "🌿 THE LAST OF US",
+                "tag_color": "#10B981",
+                "name": "The Last of Us - Santuário das Girafas",
+                "sub": "Cena Emocionante de Joel e Ellie Admirando as Girafas",
+                "file": "WP_LastOfUs_Giraffes.png",
+                "thumb": "thumb_WP_LastOfUs_Giraffes.png"
+            },
+            {
+                "id": "last_of_us_winter",
+                "category": "lastofus",
+                "tag": "🌿 THE LAST OF US",
+                "tag_color": "#10B981",
+                "name": "The Last of Us - Sobrevivência no Inverno",
+                "sub": "Ellie com Arco e Flecha na Floresta Coberta de Neve",
+                "file": "WP_LastOfUs_Winter.png",
+                "thumb": "thumb_WP_LastOfUs_Winter.png"
+            },
+
+            # 3. Futebol & FIFA (5)
             {
                 "id": "fifa_striker",
                 "category": "futebol",
@@ -2140,19 +2216,49 @@ del "%~f0" >nul 2>&1
                 "tag": "⚽ FUTEBOL & FIFA",
                 "tag_color": "#10B981",
                 "name": "Arena Champions EA FC",
-                "sub": "Estádio Holográfico com Troféu Dourado Gigante",
+                "sub": "Estádio Holográfico com Luzes e Torcida Vibrante",
                 "file": "WP_Fifa_Arena.png",
                 "thumb": "thumb_WP_Fifa_Arena.png"
             },
+            {
+                "id": "fifa_champions",
+                "category": "futebol",
+                "tag": "⚽ FUTEBOL & FIFA",
+                "tag_color": "#10B981",
+                "name": "UEFA Champions Glory",
+                "sub": "Estádio da Grande Final com Estrelas da Champions",
+                "file": "WP_Futebol_Champions.png",
+                "thumb": "thumb_WP_Futebol_Champions.png"
+            },
+            {
+                "id": "fifa_trophy",
+                "category": "futebol",
+                "tag": "⚽ FUTEBOL & FIFA",
+                "tag_color": "#10B981",
+                "name": "Taça de Ouro World Cup",
+                "sub": "Troféu Dourado Reluzente sob Holofotes e Glória",
+                "file": "WP_Futebol_Trophy.png",
+                "thumb": "thumb_WP_Futebol_Trophy.png"
+            },
+            {
+                "id": "fifa_street",
+                "category": "futebol",
+                "tag": "⚽ FUTEBOL & FIFA",
+                "tag_color": "#10B981",
+                "name": "Futebol Arte Street King",
+                "sub": "Drible Espetacular na Quadra Urbana com Grafites Neon",
+                "file": "WP_Futebol_Street.png",
+                "thumb": "thumb_WP_Futebol_Street.png"
+            },
 
-            # 3. FPS & Warzone
+            # 4. FPS & Warzone (3)
             {
                 "id": "wz_tactical",
                 "category": "fps",
                 "tag": "🎯 FPS & WARZONE",
                 "tag_color": "#EF4444",
                 "name": "Guerreiro Tático Spec-Ops",
-                "sub": "Operador Militar Modern Warfare em Combate",
+                "sub": "Operador Militar Modern Warfare em Combate Noturno",
                 "file": "WP_Tactical.png",
                 "thumb": "thumb_WP_Tactical.png"
             },
@@ -2162,12 +2268,22 @@ del "%~f0" >nul 2>&1
                 "tag": "🎯 FPS & WARZONE",
                 "tag_color": "#EF4444",
                 "name": "Sniper no Prédio (Warzone Sunset)",
-                "sub": "Operador Ghillie com Vista Panorâmica da Cidade",
+                "sub": "Operador Ghillie com Vista Panorâmica de Verdansk",
                 "file": "WP_Warzone_Sniper.png",
                 "thumb": "thumb_WP_Warzone_Sniper.png"
             },
+            {
+                "id": "wz_nightops",
+                "category": "fps",
+                "tag": "🎯 FPS & WARZONE",
+                "tag_color": "#EF4444",
+                "name": "Operação Noturna Spec-Ops",
+                "sub": "Soldado com Visão Noturna Quad-NVG sob Tempestade",
+                "file": "WP_Fps_Nightops.png",
+                "thumb": "thumb_WP_Fps_Nightops.png"
+            },
 
-            # 4. Carros & Motos
+            # 5. Carros & Motos (3)
             {
                 "id": "car_hypercar",
                 "category": "veiculos",
@@ -2188,8 +2304,18 @@ del "%~f0" >nul 2>&1
                 "file": "WP_Superbike.png",
                 "thumb": "thumb_WP_Superbike.png"
             },
+            {
+                "id": "car_drift_gtr",
+                "category": "veiculos",
+                "tag": "🏎️ CARROS & MOTOS",
+                "tag_color": "#06B6D4",
+                "name": "Midnight Drift Skyline GT-R",
+                "sub": "Drift Japonês Épico na Chuva sob Luzes de Tóquio",
+                "file": "WP_Drift_GTR.png",
+                "thumb": "thumb_WP_Drift_GTR.png"
+            },
 
-            # 5. Anime & Setup
+            # 6. Anime & Setup (6)
             {
                 "id": "anime_samurai",
                 "category": "anime",
@@ -2240,39 +2366,18 @@ del "%~f0" >nul 2>&1
                 "file": "WP_Fem.png",
                 "thumb": "thumb_WP_Fem.png"
             },
-            # 6. The Last of Us (Exclusivo)
             {
-                "id": "last_of_us_main",
-                "category": "lastofus",
-                "tag": "🌿 THE LAST OF US",
-                "tag_color": "#10B981",
-                "name": "The Last of Us - Seattle Overgrown",
-                "sub": "Joel & Ellie na Cidade Alagada com Natureza Pós-Apocalíptica",
-                "file": "WP_LastOfUs.png",
-                "thumb": "thumb_WP_LastOfUs.png"
-            },
-            {
-                "id": "last_of_us_ellie",
-                "category": "lastofus",
-                "tag": "🌿 THE LAST OF US",
-                "tag_color": "#10B981",
-                "name": "The Last of Us - Ellie Acústico",
-                "sub": "Ellie Tocando Violão na Janela ao Pôr do Sol",
-                "file": "WP_LastOfUs_Ellie.png",
-                "thumb": "thumb_WP_LastOfUs_Ellie.png"
-            },
-            {
-                "id": "last_of_us_firefly",
-                "category": "lastofus",
-                "tag": "🌿 THE LAST OF US",
-                "tag_color": "#10B981",
-                "name": "The Last of Us - Fireflies Neon",
-                "sub": "Joel com Lanterna e Grafite Neon dos Vaga-Lumes (Look for the Light)",
-                "file": "WP_LastOfUs_Firefly.png",
-                "thumb": "thumb_WP_LastOfUs_Firefly.png"
+                "id": "anime_cybercity",
+                "category": "anime",
+                "tag": "⚔️ ANIME & SETUP",
+                "tag_color": "#A855F7",
+                "name": "Neo-Tokyo Anime Cybercity",
+                "sub": "Metrópole Futurista com Mechas e Arranha-Céus Neon",
+                "file": "WP_Anime_Cybercity.png",
+                "thumb": "thumb_WP_Anime_Cybercity.png"
             },
 
-            # 7. Jogos Retrô
+            # 7. Jogos Retrô (3)
             {
                 "id": "retro_arcade",
                 "category": "retro",
@@ -2292,6 +2397,16 @@ del "%~f0" >nul 2>&1
                 "sub": "Arena de Luta Retrô Arcade 16-Bit Synthwave",
                 "file": "WP_Retro_Fighter.png",
                 "thumb": "thumb_WP_Retro_Fighter.png"
+            },
+            {
+                "id": "retro_synthwave",
+                "category": "retro",
+                "tag": "🕹️ JOGOS RETRÔ",
+                "tag_color": "#F59E0B",
+                "name": "Synthwave Outrun Neon Retrô",
+                "sub": "Sol Retrô Wireframe com Carro Esportivo dos Anos 80",
+                "file": "WP_Retro_Synthwave.png",
+                "thumb": "thumb_WP_Retro_Synthwave.png"
             }
         ]
 
@@ -2301,14 +2416,14 @@ del "%~f0" >nul 2>&1
 
         self.filter_buttons = {}
         filter_categories = [
-            ("all", "🔥 Todos (19)"),
-            ("lastofus", "🌿 The Last of Us (3)"),
-            ("oficial", "👑 Bernal Oficial (3)"),
-            ("fps", "🎯 FPS & Warzone (2)"),
-            ("futebol", "⚽ Futebol & FIFA (2)"),
-            ("veiculos", "🏎️ Carros & Motos (2)"),
-            ("anime", "⚔️ Anime & Setup (5)"),
-            ("retro", "🕹️ Jogos Retrô (2)")
+            ("all", "🔥 Todos (30)"),
+            ("lastofus", "🌿 The Last of Us (5)"),
+            ("oficial", "👑 Bernal Oficial (5)"),
+            ("futebol", "⚽ Futebol & FIFA (5)"),
+            ("fps", "🎯 FPS & Warzone (3)"),
+            ("veiculos", "🏎️ Carros & Motos (3)"),
+            ("anime", "⚔️ Anime & Setup (6)"),
+            ("retro", "🕹️ Jogos Retrô (3)")
         ]
 
         f_inner = ctk.CTkFrame(filter_bar, fg_color="transparent")
@@ -3181,11 +3296,21 @@ del "%~f0" >nul 2>&1
         threading.Thread(target=_alarm_loop, daemon=True).start()
 
     def trigger_alarm_alert(self, alarm_item):
-        try:
-            import winsound
-            winsound.MessageBeep(winsound.MB_ICONEXCLAMATION)
-        except Exception:
-            pass
+        def _play_loud_beep():
+            try:
+                import winsound
+                # Toque de alarme de notificação bem alta de 2 segundos exatos
+                for _ in range(4):
+                    winsound.Beep(1750, 180)
+                    winsound.Beep(2300, 220)
+                    time.sleep(0.08)
+            except Exception:
+                try:
+                    import winsound
+                    winsound.MessageBeep(winsound.MB_ICONEXCLAMATION)
+                except Exception:
+                    pass
+        threading.Thread(target=_play_loud_beep, daemon=True).start()
         msg = alarm_item.get("label", "Lembrete Pro Gamer!")
         t_str = alarm_item.get("time", "")
         self.log(f"⏰ ALARME DISPARADO ({t_str}): {msg}")
@@ -3387,21 +3512,41 @@ del "%~f0" >nul 2>&1
         self.log(f"🧠 Configurando Expansor de Memória RAM Virtual ({gb_size} GB)...")
         if gb_size == "auto":
             self.set_hud_progress(30, "Restaurando gerenciamento automático de memória virtual...")
-            self.run_cmd_live('wmic computersystem where name="%computername%" set AutomaticManagedPagefile=True')
-            self.run_cmd_live('reg add "HKLM\\SYSTEM\\CurrentControlSet\\Control\\Session Manager\\Memory Management" /v PagingFiles /t REG_MULTI_SZ /d "?:\\pagefile.sys" /f')
+            self.run_cmd_live('powershell -NoProfile -NonInteractive -Command "Set-CimInstance -Query \'Select * from Win32_ComputerSystem\' -Property @{AutomaticManagedPagefile=$True}"')
+            self.run_cmd_live('reg delete "HKLM\\SYSTEM\\CurrentControlSet\\Control\\Session Manager\\Memory Management" /v PagingFiles /f')
+            self.allocated_vram = 0
             self.set_hud_progress(100, "Memória Virtual restaurada para Automático do Windows!")
+            
+            def _update_auto_ui():
+                if hasattr(self, 'lbl_vram_status') and self.lbl_vram_status.winfo_exists():
+                    self.lbl_vram_status.configure(text="● Status: Padrão Windows (Auto)", text_color="#10B981")
+                if hasattr(self, 'lbl_chip_ram_val') and self.lbl_chip_ram_val.winfo_exists():
+                    s_ram = getattr(self, 'sys_ram', 16)
+                    self.lbl_chip_ram_val.configure(text=f"{s_ram} GB RAM")
+            self.after(0, _update_auto_ui)
+            
             self.after(0, lambda: messagebox.showinfo("Memória Virtual", "✅ Memória Virtual restaurada para o padrão gerenciado automaticamente pelo Windows!"))
             return
 
         mb = int(gb_size) * 1024
         self.set_hud_progress(30, "Desativando paginação dinâmica e fragmentação...")
-        self.run_cmd_live('wmic computersystem where name="%computername%" set AutomaticManagedPagefile=False')
+        self.run_cmd_live('powershell -NoProfile -NonInteractive -Command "Set-CimInstance -Query \'Select * from Win32_ComputerSystem\' -Property @{AutomaticManagedPagefile=$False}"')
         self.set_hud_progress(60, f"Alocando {gb_size}GB de Pagefile fixo no disco de sistema C:...")
         self.run_cmd_live(f'reg add "HKLM\\SYSTEM\\CurrentControlSet\\Control\\Session Manager\\Memory Management" /v PagingFiles /t REG_MULTI_SZ /d "C:\\pagefile.sys {mb} {mb}" /f')
         self.set_hud_progress(85, "Configurando retenção de Kernel na RAM física...")
         self.run_cmd_live('reg add "HKLM\\SYSTEM\\CurrentControlSet\\Control\\Session Manager\\Memory Management" /v DisablePagingExecutive /t REG_DWORD /d 1 /f')
+        self.allocated_vram = gb_size
         self.set_hud_progress(100, f"✅ +{gb_size}GB de Memória RAM Virtual alocados com sucesso!")
-        self.after(0, lambda: messagebox.showinfo("RAM Virtual Expandida", f"🚀 +{gb_size} GB de Memória Virtual alocados com sucesso no seu SSD/HD!\n\nSeu sistema agora conta com espaço contínuo para evitar travamentos por 'Out of Memory' e quedas de FPS em jogos pesados como Warzone e GTA V."))
+
+        def _update_alloc_ui():
+            if hasattr(self, 'lbl_vram_status') and self.lbl_vram_status.winfo_exists():
+                self.lbl_vram_status.configure(text=f"✅ +{gb_size} GB Alocado no C:", text_color="#00D2FF")
+            if hasattr(self, 'lbl_chip_ram_val') and self.lbl_chip_ram_val.winfo_exists():
+                s_ram = getattr(self, 'sys_ram', 16)
+                self.lbl_chip_ram_val.configure(text=f"{s_ram} GB + {gb_size}GB Virt")
+        self.after(0, _update_alloc_ui)
+
+        self.after(0, lambda: messagebox.showinfo("RAM Virtual Expandida", f"🚀 +{gb_size} GB de Memória Virtual alocados com sucesso no seu SSD/HD!\n\nSeu sistema agora conta com {getattr(self, 'sys_ram', 16)} GB Físicos + {gb_size} GB Virtuais no C:.\nEvita travamentos por 'Out of Memory' e quedas de FPS em jogos pesados como Warzone e GTA V."))
 
     def measure_dns_latency(self, host, port=53, timeout=1.2):
         """Mede a latência real de DNS via socket TCP/UDP direto (sem spawn de CMD, sem timeout)."""
