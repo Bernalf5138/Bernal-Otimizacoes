@@ -5,7 +5,7 @@ ctk.set_appearance_mode("dark")
 ctk.set_default_color_theme("blue")
 
 INSTALL_DIR  = os.path.join(os.environ.get("LOCALAPPDATA", os.path.expanduser("~")), "Bernal Otimizacoes")
-APP_NAME     = "Bernal Otimizações Pro V9.1"
+APP_NAME     = "Bernal Otimizações Pro V9.2"
 EXE_NAME     = "BernalOtimizacoes.exe"
 DESKTOP_PATH = os.path.join(os.path.expanduser("~"), "Desktop")
 
@@ -25,7 +25,7 @@ def create_shortcut(target, shortcut_path):
 class InstallerApp(ctk.CTk):
     def __init__(self):
         super().__init__()
-        self.title("Setup - Bernal Otimizações V9.1")
+        self.title("Setup - Bernal Otimizações V9.2")
         self.geometry("600x450")
         self.resizable(False, False)
         
@@ -37,7 +37,7 @@ class InstallerApp(ctk.CTk):
         ctk.CTkLabel(header, text="⚡ Bernal Otimizações Pro",
                      font=ctk.CTkFont(size=22, weight="bold"),
                      text_color="#00d4ff").pack(pady=14)
-        ctk.CTkLabel(header, text="Assistente de Instalação  •  Versão 9.1 (Oficial)",
+        ctk.CTkLabel(header, text="Assistente de Instalação  •  Versão 9.2 (Oficial)",
                      font=ctk.CTkFont(size=11), text_color="#888").pack(pady=(0, 10))
 
         # ---- Body ----
@@ -86,7 +86,7 @@ class InstallerApp(ctk.CTk):
                      font=ctk.CTkFont(size=12), text_color="#aaa").pack(anchor="w", padx=30, pady=2)
 
         # --- Header ---
-        self.lbl_title = ctk.CTkLabel(self.body, text="Bernal Otimizações PRO - Setup (V9.1)", font=ctk.CTkFont(size=11), text_color="#00d4ff")
+        self.lbl_title = ctk.CTkLabel(self.body, text="Bernal Otimizações PRO - Setup (V9.2)", font=ctk.CTkFont(size=11), text_color="#00d4ff")
         self.lbl_status = ctk.CTkLabel(self.body, text="",
                                         font=ctk.CTkFont(size=11), text_color="#00d4ff")
         self.lbl_status.pack(anchor="w", padx=30, pady=(18, 2))
@@ -368,7 +368,7 @@ class InstallerApp(ctk.CTk):
             self.after(0, lambda: self.setstatus("📝 Registrando no Windows...", 0.85))
             reg_cmds = [
                 f'reg add "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\BernalOtimizacoes" /v "DisplayName" /t REG_SZ /d "{APP_NAME}" /f',
-                f'reg add "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\BernalOtimizacoes" /v "DisplayVersion" /t REG_SZ /d "9.1" /f',
+                f'reg add "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\BernalOtimizacoes" /v "DisplayVersion" /t REG_SZ /d "9.2" /f',
                 f'reg add "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\BernalOtimizacoes" /v "Publisher" /t REG_SZ /d "Bernal Otimizacoes" /f',
                 f'reg add "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\BernalOtimizacoes" /v "InstallLocation" /t REG_SZ /d "{INSTALL_DIR}" /f',
                 f'reg add "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\BernalOtimizacoes" /v "UninstallString" /t REG_SZ /d "\\"{uninstall_script}\\"" /f',

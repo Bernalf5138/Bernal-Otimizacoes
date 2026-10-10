@@ -218,7 +218,7 @@ class OtimizadorApp(ctk.CTk):
         
         self.current_lang = "pt"
 
-        self.title("Bernal Otimizações PRO - V9.1 (Edição Definitiva)")
+        self.title("Bernal Otimizações PRO - V9.2 (Edição Definitiva)")
         sw = self.winfo_screenwidth()
         sh = self.winfo_screenheight()
         w, h = 1220, 760
@@ -299,7 +299,7 @@ class OtimizadorApp(ctk.CTk):
                                    font=("Arial", 52), fill="#00d4ff")
         title = canvas.create_text(w//2, 160, text="Bernal Otimizações Pro",
                                     font=("Arial", 20, "bold"), fill="white")
-        subtitle = canvas.create_text(w//2, 190, text="Versão 9.1  •  Performance Máxima Definitiva",
+        subtitle = canvas.create_text(w//2, 190, text="Versão 9.2  •  Performance Máxima Definitiva",
                                        font=("Arial", 11), fill="#00D2FF")
         status = canvas.create_text(w//2, 240, text="Iniciando...",
                                      font=("Arial", 10), fill="#00d4ff")
@@ -616,7 +616,11 @@ class OtimizadorApp(ctk.CTk):
         pass
 
     def log(self, message):
-        print(message)
+        try:
+            if sys.stdout is not None:
+                print(message)
+        except Exception:
+            pass
         
         def _append():
             if hasattr(self, 'log_textbox') and self.log_textbox.winfo_exists():
@@ -1104,7 +1108,7 @@ class OtimizadorApp(ctk.CTk):
         # Inicia Telemetria ao vivo no Painel (Relógio, Uptime, CPU/RAM/GPU temps & uso)
         self.init_telemetry_hud()
 
-        self.log("Aplicativo Inicializado V9.1.")
+        self.log("Aplicativo Inicializado V9.2.")
         self.log("Aguardando leitura de Hardware...")
 
         # Verificação silenciosa de atualização na nuvem (GitHub)
@@ -1128,7 +1132,7 @@ class OtimizadorApp(ctk.CTk):
 
         ctk.CTkLabel(
             brand_frame,
-            text="v9.1 Oficial • Painel Gamer Pro",
+            text="v9.2 Oficial • Painel Gamer Pro",
             font=ctk.CTkFont(family="Arial", size=11),
             text_color="#8E8AA0"
         ).pack(side="left")
@@ -1212,7 +1216,7 @@ class OtimizadorApp(ctk.CTk):
         req = urllib.request.Request(
             api_url,
             headers={
-                "User-Agent": "BernalOtimizacoes-AutoUpdater/9.1",
+                "User-Agent": "BernalOtimizacoes-AutoUpdater/9.2",
                 "Accept": "application/vnd.github.v3+json"
             }
         )
@@ -1250,7 +1254,7 @@ class OtimizadorApp(ctk.CTk):
                         break
 
             remote_ver = self.parse_version_tuple(tag_name)
-            local_ver = self.parse_version_tuple("9.1")
+            local_ver = self.parse_version_tuple("9.2")
 
             if remote_ver > local_ver and download_url:
                 self.log(f"🚀 Nova versão encontrada na nuvem: {tag_name}!")
@@ -1266,7 +1270,7 @@ class OtimizadorApp(ctk.CTk):
                 if manual:
                     self.after(0, lambda: messagebox.showinfo(
                         "Atualizações",
-                        f"✅ Você já está utilizando a versão mais recente!\n\nVersão instalada: V9.1 PRO Oficial\nServidor: Nuvem GitHub sincronizada."
+                        f"✅ Você já está utilizando a versão mais recente!\n\nVersão instalada: V9.2 PRO Oficial\nServidor: Nuvem GitHub sincronizada."
                     ))
         except urllib.error.HTTPError as e:
             if e.code == 404:
@@ -1274,7 +1278,7 @@ class OtimizadorApp(ctk.CTk):
                 if manual:
                     self.after(0, lambda: messagebox.showinfo(
                         "Nenhuma Atualização",
-                        "✅ O sistema está na versão mais atual (V9.1 PRO)!\n\nNenhuma atualização mais recente foi publicada pelo administrador ainda."
+                        "✅ O sistema está na versão mais atual (V9.2 PRO)!\n\nNenhuma atualização mais recente foi publicada pelo administrador ainda."
                     ))
             else:
                 if manual:
@@ -1300,7 +1304,7 @@ class OtimizadorApp(ctk.CTk):
 
         ctk.CTkLabel(body, text="🚀 NOVA ATUALIZAÇÃO DISPONÍVEL!", font=ctk.CTkFont(size=16, weight="bold"), text_color="#00D2FF").pack(pady=(18, 4))
         
-        tag = info.get("tag", "V9.2")
+        tag = info.get("tag", "V9.3")
         sz = info.get("size_mb", 0.0)
         sz_str = f" • {sz:.1f} MB" if sz > 0 else ""
         
@@ -1309,7 +1313,7 @@ class OtimizadorApp(ctk.CTk):
         
         ctk.CTkLabel(
             badge_frame,
-            text=f"Versão Atual: V9.1 PRO  ➔  Nova Versão: {tag}{sz_str}",
+            text=f"Versão Atual: V9.2 PRO  ➔  Nova Versão: {tag}{sz_str}",
             font=ctk.CTkFont(size=12, weight="bold"),
             text_color="#10B981"
         ).pack(pady=8)
@@ -1348,7 +1352,7 @@ class OtimizadorApp(ctk.CTk):
         btn_cancel.pack(side="right")
 
     def start_download_and_apply_update(self, download_url, tag_name, asset_name="BernalOtimizacoes.exe"):
-        """Baixa a nova versão mostrando progresso e aplica reiniciando o app."""
+        """Baixa a nova versão mostrando progresso e aplica reiniciando o app automaticamente."""
         import urllib.request, tempfile, shutil
 
         self.log(f"⬇️ Iniciando download da atualização {tag_name}...")
@@ -1359,7 +1363,7 @@ class OtimizadorApp(ctk.CTk):
                 except: pass
             self.current_hud = CyberProgressHUD(self, title=f"Baixando Atualização {tag_name}", initial_msg="Conectando à nuvem da Microsoft / GitHub...")
         self.after(0, _open_hud)
-        time.sleep(0.4)
+        time.sleep(0.3)
         self.set_hud_progress(5, "Conectando aos servidores do GitHub...")
 
         temp_dir = tempfile.gettempdir()
@@ -1367,11 +1371,16 @@ class OtimizadorApp(ctk.CTk):
         temp_dest = os.path.join(temp_dir, "BernalOtimizacoes_NovaVersao.exe")
 
         try:
-            req = urllib.request.Request(download_url, headers={"User-Agent": "Mozilla/5.0"})
-            with urllib.request.urlopen(req, timeout=30) as resp:
+            headers = {
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                "Accept": "*/*"
+            }
+            req = urllib.request.Request(download_url, headers=headers)
+            with urllib.request.urlopen(req, timeout=60) as resp:
                 total_size = int(resp.headers.get("content-length", 0))
                 downloaded = 0
-                chunk_size = 256 * 1024 # 256KB
+                chunk_size = 512 * 1024 # 512KB chunks
+                last_pct = 5
 
                 with open(temp_dest, "wb") as f_out:
                     while True:
@@ -1382,23 +1391,25 @@ class OtimizadorApp(ctk.CTk):
                         downloaded += len(chunk)
                         if total_size > 0:
                             pct = min(98, max(5, int((downloaded / total_size) * 95)))
-                            mb_cur = downloaded / (1024 * 1024)
-                            mb_tot = total_size / (1024 * 1024)
-                            self.set_hud_progress(pct, f"Baixando: {mb_cur:.1f} MB de {mb_tot:.1f} MB ({pct}%)...")
+                            if pct != last_pct:
+                                last_pct = pct
+                                mb_cur = downloaded / (1024 * 1024)
+                                mb_tot = total_size / (1024 * 1024)
+                                self.set_hud_progress(pct, f"Baixando: {mb_cur:.1f} MB de {mb_tot:.1f} MB ({pct}%)...")
 
             self.set_hud_progress(100, "✅ Download 100% concluído! Instalando e reiniciando...")
-            time.sleep(1.2)
+            time.sleep(1.0)
 
-            # Destino de instalação do aplicativo
+            # Destino principal e backup local
             if getattr(sys, 'frozen', False):
                 target_exe = sys.executable
             else:
-                local_dir = os.path.join(os.environ.get("LOCALAPPDATA", ""), "Bernal Otimizacoes")
-                target_exe = os.path.join(local_dir, "BernalOtimizacoes.exe")
-                if not os.path.exists(target_exe):
-                    target_exe = os.path.join(os.path.dirname(os.path.abspath(__file__)), "dist", "BernalOtimizacoes.exe")
+                target_exe = os.path.join(os.path.dirname(os.path.abspath(__file__)), "dist", "BernalOtimizacoes.exe")
 
-            # Script de reinício e substituição silenciosa com loop de retry
+            local_dir = os.path.join(os.environ.get("LOCALAPPDATA", ""), "Bernal Otimizacoes")
+            local_exe = os.path.join(local_dir, "BernalOtimizacoes.exe")
+
+            # Script bat de auto-substituição resiliente
             bat_path = os.path.join(temp_dir, "apply_bernal_update.bat")
             if is_installer:
                 bat_content = f"""@echo off
@@ -1409,12 +1420,25 @@ del "%~f0" >nul 2>&1
 """
             else:
                 bat_content = f"""@echo off
-timeout /t 1 /nobreak >nul
+timeout /t 2 /nobreak >nul
 taskkill /F /IM BernalOtimizacoes.exe >nul 2>&1
-:retry
 timeout /t 1 /nobreak >nul
+set RETRY=0
+:retry
+set /a RETRY+=1
 copy /Y "{temp_dest}" "{target_exe}" >nul 2>&1
-if errorlevel 1 goto retry
+if not errorlevel 1 goto success
+if %RETRY% GEQ 20 goto fallback
+timeout /t 1 /nobreak >nul
+goto retry
+
+:fallback
+move /Y "{temp_dest}" "{target_exe}" >nul 2>&1
+
+:success
+if exist "{local_exe}" (
+    copy /Y "{target_exe}" "{local_exe}" >nul 2>&1
+)
 del /F /Q "{temp_dest}" >nul 2>&1
 start "" "{target_exe}"
 del "%~f0" >nul 2>&1
@@ -1423,14 +1447,14 @@ del "%~f0" >nul 2>&1
             with open(bat_path, "w", encoding="utf-8") as f_bat:
                 f_bat.write(bat_content)
 
-            self.log(f"🔄 Executando auto-atualização para {tag_name}...")
+            self.log(f"🔄 Executando reinício e auto-atualização para {tag_name}...")
             si_bat = subprocess.STARTUPINFO()
             si_bat.dwFlags |= subprocess.STARTF_USESHOWWINDOW
             si_bat.wShowWindow = 0
             subprocess.Popen(f'cmd.exe /c "{bat_path}"', shell=True, startupinfo=si_bat, creationflags=subprocess.CREATE_NO_WINDOW)
             
-            # Encerra o processo atual de forma limpa
-            time.sleep(0.4)
+            # Encerra o processo atual de forma limpa para liberar o arquivo
+            time.sleep(0.3)
             self.after(0, self.destroy)
             import os
             os._exit(0)
@@ -1733,7 +1757,7 @@ del "%~f0" >nul 2>&1
         card_ver.pack(fill="x", padx=10, pady=(6, 12))
         ctk.CTkLabel(
             card_ver,
-            text="⚡ VERSÃO 9.1 PRO OFICIAL\nBernal Otimizações © 2026\n● SISTEMA CALIBRADO",
+            text="⚡ VERSÃO 9.2 PRO OFICIAL\nBernal Otimizações © 2026\n● SISTEMA CALIBRADO",
             font=ctk.CTkFont(size=10, weight="bold"),
             text_color="#00D2FF",
             justify="center"
@@ -3348,11 +3372,16 @@ del "%~f0" >nul 2>&1
 
     def open_display_settings(self):
         self.log("Abrindo configurações de exibição e taxa de atualização (Hz) do Windows...")
+        si = subprocess.STARTUPINFO()
+        si.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+        si.wShowWindow = 0
         try:
-            os.system("start ms-settings:display-advanced")
-        except:
-            try: os.system("start ms-settings:display")
-            except: os.system("start desk.cpl")
+            subprocess.Popen('explorer.exe ms-settings:display-advanced', shell=True, startupinfo=si, creationflags=subprocess.CREATE_NO_WINDOW)
+        except Exception:
+            try:
+                subprocess.Popen('explorer.exe ms-settings:display', shell=True, startupinfo=si, creationflags=subprocess.CREATE_NO_WINDOW)
+            except Exception:
+                subprocess.Popen('desk.cpl', shell=True, startupinfo=si, creationflags=subprocess.CREATE_NO_WINDOW)
 
     def apply_virtual_ram_pagefile(self, gb_size=8):
         self.log(f"🧠 Configurando Expansor de Memória RAM Virtual ({gb_size} GB)...")
