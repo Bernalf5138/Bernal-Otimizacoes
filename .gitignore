@@ -1,0 +1,23 @@
+# PyInstaller build artifacts
+build/
+dist/
+*.spec.bak
+__pycache__/
+*.pyc
+
+# Logs & temporaries
+*.log
+crash_log.txt
+full_log.txt
+error.log
+dump.txt
+recovered.txt
+extracted_strings*.txt
+all_code_snippets.txt
+view_file_*.txt
+*.extracted/
+OtimizadorGamer.exe_extracted/
+obf_dist/
+
+# Release archives
+*.zip
