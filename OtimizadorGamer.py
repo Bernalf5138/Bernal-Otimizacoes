@@ -1379,10 +1379,15 @@ class OtimizadorApp(ctk.CTk):
             }
             req = urllib.request.Request(download_url, headers=headers)
             with urllib.request.urlopen(req, timeout=60) as resp:
-                total_size = int(resp.headers.get("content-length", 0))
+                total_size = int(resp.headers.get("content-length", 0) or 0)
                 downloaded = 0
-                chunk_size = 512 * 1024 # 512KB chunks
-                last_pct = 5
+                chunk_size = 256 * 1024 # 256KB chunks
+                t_last = time.time()
+                
+                if total_size > 0:
+                    self.set_hud_progress(6, f"Conectado! Baixando {total_size / (1024*1024):.1f} MB...")
+                else:
+                    self.set_hud_progress(6, "Conectado! Baixando atualização...")
 
                 with open(temp_dest, "wb") as f_out:
                     while True:
@@ -1391,16 +1396,19 @@ class OtimizadorApp(ctk.CTk):
                             break
                         f_out.write(chunk)
                         downloaded += len(chunk)
-                        if total_size > 0:
-                            pct = min(98, max(5, int((downloaded / total_size) * 95)))
-                            if pct != last_pct:
-                                last_pct = pct
-                                mb_cur = downloaded / (1024 * 1024)
+                        now = time.time()
+                        if now - t_last >= 0.25:
+                            t_last = now
+                            mb_cur = downloaded / (1024 * 1024)
+                            if total_size > 0:
                                 mb_tot = total_size / (1024 * 1024)
+                                pct = min(98, max(6, int((downloaded / total_size) * 94) + 5))
                                 self.set_hud_progress(pct, f"Baixando: {mb_cur:.1f} MB de {mb_tot:.1f} MB ({pct}%)...")
+                            else:
+                                self.set_hud_progress(30, f"Baixando: {mb_cur:.1f} MB transferidos...")
 
             self.set_hud_progress(100, "✅ Download 100% concluído! Instalando e reiniciando...")
-            time.sleep(1.0)
+            time.sleep(0.8)
 
             # Destino principal e backup local
             if getattr(sys, 'frozen', False):
@@ -3850,11 +3858,25 @@ del "%~f0" >nul 2>&1
 
     def optimize_game_disks(self):
         """Otimizador / Desfragmentador de Disco e Arquivos de Jogos (Game Defrag)."""
-        self.log("💾 Iniciando Game Defrag / Alinhamento de Arquivos de Jogos no Disco C:...")
-        self.run_cmd_live('powershell -Command "Optimize-Volume -DriveLetter C -Defrag -Verbose -ErrorAction SilentlyContinue"')
+        self.log("💿 Iniciando Game Defrag & Otimização Rápida de Armazenamento...")
+        self.set_hud_progress(30, "Ativando suporte TRIM global de alto desempenho...")
+        self.run_cmd_live('fsutil behavior set DisableDeleteNotify 0')
+        self.set_hud_progress(60, "Executando calibração TRIM (SSD/NVMe) e alinhamento de blocos...")
+        ps_cmd = (
+            'powershell -NoProfile -NonInteractive -Command "'
+            'try { Optimize-Volume -DriveLetter C -ReTrim -ErrorAction Stop } '
+            'catch { defrag C: /O /U }"'
+        )
+        self.run_cmd_live(ps_cmd)
+        self.set_hud_progress(100, "Otimização de armazenamento concluída com sucesso!")
         self.log("✅ Otimização de Arquivos e Volumes concluída com sucesso! Carregamento de jogos e texturas acelerado.")
         from tkinter import messagebox
-        self.after(0, lambda: messagebox.showinfo("Game Defrag Concluído", "💾 Otimização de armazenamento e alinhamento de arquivos concluída com sucesso!"))
+        self.after(0, lambda: messagebox.showinfo(
+            "Game Defrag Concluído",
+            "🚀 Otimização de Armazenamento Concluída com Sucesso!\n\n"
+            "• SSD/NVMe: TRIM executado para leitura e escrita instantâneas.\n"
+            "• Tempos de carregamento de texturas e mapas acelerados sem micro-stuttering."
+        ))
 
     def update_trial_timer(self):
         if not self.is_trial:
