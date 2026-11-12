@@ -10,14 +10,29 @@ try:
 except Exception:
     pass
 
+import re
+
+# A versão vem do APP_VERSION do OtimizadorGamer.py: não precisa de um script por versão.
+with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "OtimizadorGamer.py"), encoding="utf-8") as _f:
+    VERSION = re.search(r'^APP_VERSION\s*=\s*"([^"]+)"', _f.read(), re.M).group(1)
+
 OWNER = "Bernalf5138"
 REPO = "Bernal-Otimizacoes"
-TAG = "v10.7"
-NAME = "Bernal Otimizações PRO V10.7 Oficial"
+TAG = f"v{VERSION}"
+NAME = f"Bernal Otimizações PRO V{VERSION} Oficial"
+SETUP_NAME = f"Setup_Bernal_Otimizacoes_V{VERSION}.exe"
+
+# Novidades desta versão (troque a cada release)
+NOTES = """
+- 🛠️ **Atualização automática consertada:** o download pelo GitHub parava em 5% e não saía mais. Agora baixa normalmente.
+- ⏱️ Se o download travar, o app tenta de novo sozinho e, se não der, oferece baixar pelo navegador.
+- 🖱️ Vários cliques em "Atualizações" não abrem mais várias verificações ao mesmo tempo.
+- 📦 O instalador mostra a versão certa em "Aplicativos instalados" e não acumula atalhos antigos.
+"""
 
 FILES = [
     (os.path.join("dist", "BernalOtimizacoes.exe"), "BernalOtimizacoes.exe"),
-    (os.path.join("dist", "Setup_Bernal_Otimizacoes_V10.7.exe"), "Setup_Bernal_Otimizacoes_V10.7.exe"),
+    (os.path.join("dist", SETUP_NAME), SETUP_NAME),
 ]
 HASH_ASSET = "BernalOtimizacoes.exe"
 
@@ -43,7 +58,7 @@ def sha256(path):
 def main():
     faltando = [fp for fp, _ in FILES if not os.path.exists(fp)]
     if faltando:
-        print("❌ Os arquivos abaixo não existem ainda. Rode o build V10.7 primeiro:")
+        print(f"❌ Os arquivos abaixo não existem ainda. Rode o build V{VERSION} primeiro:")
         for fp in faltando:
             print("   -", fp)
         return False
@@ -63,10 +78,9 @@ def main():
         'User-Agent': 'Bernal-Release-Publisher'
     }
 
-    release_notes = f"""## 🔧 Bernal Otimizações Pro V10.7
+    release_notes = f"""## 🔧 Bernal Otimizações Pro V{VERSION}
 
-- 🛠️ **Atualizador corrigido:** quando o download da atualização falha, o app agora mostra o erro certo em vez de travar.
-- 🧹 Limpeza de arquivos antigos do projeto.
+{NOTES.strip()}
 
 SHA256: {digest}
 """
@@ -75,7 +89,7 @@ SHA256: {digest}
     req = urllib.request.Request(rel_url, headers=headers)
     with urllib.request.urlopen(req) as resp:
         releases = json.loads(resp.read().decode('utf-8'))
-    target = next((r for r in releases if r.get('tag_name') in (TAG, "10.7")), None)
+    target = next((r for r in releases if r.get('tag_name') in (TAG, VERSION)), None)
 
     if not target:
         print(f"📦 Criando release {TAG}...")
@@ -122,7 +136,7 @@ SHA256: {digest}
                 res = json.loads(ur.read().decode('utf-8'))
                 print(f"  ✅ {res.get('browser_download_url')}")
 
-    print("\n🎉 Release V10.7 publicada! Os clientes nas versões antigas vão receber o aviso de atualização.")
+    print(f"\n🎉 Release V{VERSION} publicada! Os clientes nas versões antigas vão receber o aviso de atualização.")
     return True
 
 

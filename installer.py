@@ -5,7 +5,9 @@ ctk.set_appearance_mode("dark")
 ctk.set_default_color_theme("blue")
 
 INSTALL_DIR  = os.path.join(os.environ.get("LOCALAPPDATA", os.path.expanduser("~")), "Bernal Otimizacoes")
-APP_NAME     = "Bernal Otimizações Pro V10.4"
+APP_VERSION  = "10.8"   # única versão do instalador: mude só aqui (igual ao APP_VERSION do OtimizadorGamer.py)
+APP_NAME     = f"Bernal Otimizações Pro V{APP_VERSION}"
+SHORTCUT_NAME = "Bernal Otimizações Pro"   # sem número, para não acumular um atalho por versão
 EXE_NAME     = "BernalOtimizacoes.exe"
 def get_desktop_path():
     try:
@@ -42,7 +44,7 @@ def create_shortcut(target, shortcut_path):
 class InstallerApp(ctk.CTk):
     def __init__(self):
         super().__init__()
-        self.title("Setup - Bernal Otimizações V10.4")
+        self.title(f"Setup - Bernal Otimizações V{APP_VERSION}")
         self.geometry("600x450")
         self.resizable(False, False)
         
@@ -103,7 +105,7 @@ class InstallerApp(ctk.CTk):
                      font=ctk.CTkFont(size=12), text_color="#aaa").pack(anchor="w", padx=30, pady=2)
 
         # --- Header ---
-        self.lbl_title = ctk.CTkLabel(self.body, text="Bernal Otimizações PRO - Setup (V10.4)", font=ctk.CTkFont(size=11), text_color="#00d4ff")
+        self.lbl_title = ctk.CTkLabel(self.body, text=f"Bernal Otimizações PRO - Setup (V{APP_VERSION})", font=ctk.CTkFont(size=11), text_color="#00d4ff")
         self.lbl_status = ctk.CTkLabel(self.body, text="",
                                         font=ctk.CTkFont(size=11), text_color="#00d4ff")
         self.lbl_status.pack(anchor="w", padx=30, pady=(18, 2))
@@ -227,10 +229,20 @@ class InstallerApp(ctk.CTk):
             self.after(0, lambda: self.setstatus("🗑️ Criando desinstalador...", 0.40))
             uninstall_script = os.path.join(INSTALL_DIR, "Desinstalar.bat")
             uninstall_reg_key = r"HKCU\Software\Microsoft\Windows\CurrentVersion\Uninstall\BernalOtimizacoes"
-            desktop_lnk   = os.path.join(DESKTOP_PATH, f"{APP_NAME}.lnk")
+            desktop_lnk   = os.path.join(DESKTOP_PATH, f"{SHORTCUT_NAME}.lnk")
             sm_dir        = os.path.join(os.environ.get('APPDATA', ''),
                                          r'Microsoft\Windows\Start Menu\Programs\Bernal Otimizacoes')
-            sm_lnk        = os.path.join(sm_dir, f"{APP_NAME}.lnk")
+            sm_lnk        = os.path.join(sm_dir, f"{SHORTCUT_NAME}.lnk")
+            sm_root_dir   = os.path.join(os.environ.get('APPDATA', ''), r'Microsoft\Windows\Start Menu\Programs')
+
+            # Apaga atalhos de versões antigas ("Bernal Otimizações Pro V10.4.lnk" etc.)
+            import glob
+            for d in (DESKTOP_PATH, sm_dir, sm_root_dir):
+                for old in glob.glob(os.path.join(d, "Bernal Otimiza* V*.lnk")):
+                    try:
+                        os.remove(old)
+                    except Exception:
+                        pass
 
             bat_lines = [
                 "@echo off",
@@ -378,16 +390,15 @@ class InstallerApp(ctk.CTk):
             os.makedirs(sm_dir, exist_ok=True)
             create_shortcut(dest_app, sm_lnk)
             # Também adiciona na raiz de Programas para exibir diretamente na Área de Início
-            sm_root_dir = os.path.join(os.environ.get('APPDATA', ''), r'Microsoft\Windows\Start Menu\Programs')
             if os.path.exists(sm_root_dir):
-                create_shortcut(dest_app, os.path.join(sm_root_dir, f"{APP_NAME}.lnk"))
+                create_shortcut(dest_app, os.path.join(sm_root_dir, f"{SHORTCUT_NAME}.lnk"))
             time.sleep(0.2)
 
             # ── Registro Windows (Adicionar/Remover Programas) ───────────
             self.after(0, lambda: self.setstatus("📝 Registrando no Windows...", 0.85))
             reg_cmds = [
                 f'reg add "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\BernalOtimizacoes" /v "DisplayName" /t REG_SZ /d "{APP_NAME}" /f',
-                f'reg add "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\BernalOtimizacoes" /v "DisplayVersion" /t REG_SZ /d "10.4" /f',
+                f'reg add "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\BernalOtimizacoes" /v "DisplayVersion" /t REG_SZ /d "{APP_VERSION}" /f',
                 f'reg add "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\BernalOtimizacoes" /v "Publisher" /t REG_SZ /d "Bernal Otimizacoes" /f',
                 f'reg add "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\BernalOtimizacoes" /v "InstallLocation" /t REG_SZ /d "{INSTALL_DIR}" /f',
                 f'reg add "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\BernalOtimizacoes" /v "UninstallString" /t REG_SZ /d "\\"{uninstall_script}\\"" /f',

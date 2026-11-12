@@ -22,7 +22,7 @@ import hashlib
 import hmac
 import queue as _queue_mod
 
-APP_VERSION = "10.7"
+APP_VERSION = "10.8"
 
 # --------------------------------------------------------------------------
 # Senhas: nunca em texto puro no código. Para trocar uma senha, rode:
@@ -813,6 +813,7 @@ class OtimizadorApp(ctk.CTk):
                 pass
 
     def set_hud_progress(self, pct, msg=None):
+        self._last_progress_ts = time.time()  # usado pelo vigia do atualizador
         def _upd(p=pct, m=msg):
             hud = getattr(self, 'current_hud', None)
             if hud is not None and hud.winfo_exists():
@@ -1437,8 +1438,24 @@ class OtimizadorApp(ctk.CTk):
             self.after(0, lambda err=e: messagebox.showerror("Atualização", f"Não foi possível atualizar:\n{err}"))
         return True
 
+    _update_check_lock = threading.Lock()
+
     def check_for_updates(self, manual=False):
-        """Verifica na nuvem (GitHub Releases) se há uma nova versão disponível."""
+        """Verifica na nuvem (GitHub Releases) se há uma nova versão disponível.
+        Só roda uma verificação por vez, mesmo com vários cliques no botão."""
+        if getattr(self, "_update_downloading", False):
+            self.log("⏳ Já tem uma atualização sendo baixada, aguarde.")
+            return
+        if not self._update_check_lock.acquire(blocking=False):
+            if manual:
+                self.log("⏳ A verificação de atualizações já está em andamento.")
+            return
+        try:
+            self._check_for_updates_impl(manual)
+        finally:
+            self._update_check_lock.release()
+
+    def _check_for_updates_impl(self, manual=False):
         import urllib.request, json
         from tkinter import messagebox
 
@@ -1549,7 +1566,11 @@ class OtimizadorApp(ctk.CTk):
 
     def show_update_available_dialog(self, info):
         """Abre janela moderna avisando da nova versão."""
+        old = getattr(self, "_update_dialog", None)
+        if getattr(self, "_update_downloading", False) or (old is not None and old.winfo_exists()):
+            return  # já tem um aviso aberto ou um download em andamento
         dlg = ctk.CTkToplevel(self)
+        self._update_dialog = dlg
         dlg.title("🚀 Atualização Disponível • Bernal Otimizações")
         dlg.geometry("520x460")
         dlg.attributes("-topmost", True)
@@ -1714,12 +1735,84 @@ class OtimizadorApp(ctk.CTk):
         raise IOError("Não foi possível baixar de nenhum método. " + " | ".join(errors) +
                       "\nBaixe manualmente em: https://github.com/Bernalf5138/Bernal-Otimizacoes/releases/latest")
 
-    def start_download_and_apply_update(self, download_url, tag_name, asset_name="BernalOtimizacoes.exe", expected_sha256=None, size_hint=0):
-        """Baixa a nova versão, confere o SHA-256 e só então aplica, reiniciando o app."""
-        import urllib.request, tempfile, shutil
+    UPDATE_STALL_SECONDS = 60
 
-        self.log(f"⬇️ Iniciando download da atualização {tag_name}...")
-        
+    def start_download_and_apply_update(self, download_url, tag_name, asset_name="BernalOtimizacoes.exe", expected_sha256=None, size_hint=0):
+        """Ponto de entrada do download (roda numa thread). Liga um vigia: se nada avançar por
+        UPDATE_STALL_SECONDS, tenta de novo uma vez; se travar de novo, oferece o navegador."""
+        if getattr(self, "_update_downloading", False):
+            self.log("⏳ Já tem uma atualização sendo baixada, aguarde.")
+            return
+        self._update_downloading = True
+        self._update_fallback_shown = False
+        self._update_attempt = 0
+        args = (download_url, tag_name, asset_name, expected_sha256, size_hint)
+        threading.Thread(target=self._update_watchdog, args=args, daemon=True).start()
+        self._run_update_attempt(*args)
+
+    def _run_update_attempt(self, *args):
+        self._update_attempt += 1
+        attempt = self._update_attempt
+        self._last_progress_ts = time.time()
+        try:
+            self._download_and_apply_update(attempt, *args)
+        except BaseException as e:
+            import traceback
+            self.log(f"❌ Erro no Auto-Updater (tentativa {attempt}): {e}\n{traceback.format_exc()}")
+            if attempt == self._update_attempt:
+                self.set_hud_progress(100, "❌ Download automático falhou.")
+                self._update_fallback()
+        finally:
+            if attempt == self._update_attempt:
+                self._update_downloading = False
+
+    def _update_watchdog(self, *args):
+        tag_name = args[1]
+        while getattr(self, "_update_downloading", False):
+            time.sleep(3)
+            parado = time.time() - getattr(self, "_last_progress_ts", time.time())
+            if parado < self.UPDATE_STALL_SECONDS:
+                continue
+            if self._update_attempt < 2:
+                self.log(f"⚠️ O download da {tag_name} parou de responder há {int(parado)}s. Tentando de novo...")
+                threading.Thread(target=self._run_update_attempt, args=args, daemon=True).start()
+                time.sleep(1)
+            else:
+                self.log(f"❌ O download da {tag_name} travou duas vezes. Oferecendo o navegador.")
+                self._update_attempt += 1          # invalida as tentativas presas
+                self._update_downloading = False
+                self.set_hud_progress(100, "❌ O download parou de responder.")
+                self._update_fallback()
+                return
+
+    def _update_fallback(self):
+        """Oferece baixar pelo navegador (mostra uma vez só)."""
+        if getattr(self, "_update_fallback_shown", False):
+            return
+        self._update_fallback_shown = True
+        fallback_url = "https://github.com/Bernalf5138/Bernal-Otimizacoes/releases/latest"
+
+        def _ask():
+            abrir = messagebox.askyesno("Baixar pelo navegador",
+                "Não consegui baixar a atualização aqui dentro do app "
+                "(a rede pode estar bloqueando o download direto).\n\n"
+                "Quer abrir o navegador para baixar a nova versão? "
+                "É só rodar o arquivo baixado para atualizar — seus dados são mantidos.")
+            if abrir:
+                try:
+                    webbrowser.open(fallback_url)
+                    self.log("🌐 Página de download aberta no navegador.")
+                except Exception as ex:
+                    messagebox.showerror("Falha na atualização",
+                        "Baixe manualmente em:\n" + fallback_url + "\n\n" + str(ex)[:300])
+        self.after(0, _ask)
+
+    def _download_and_apply_update(self, attempt, download_url, tag_name, asset_name="BernalOtimizacoes.exe", expected_sha256=None, size_hint=0):
+        """Baixa a nova versão, confere o SHA-256 e só então aplica, reiniciando o app."""
+        import tempfile
+
+        self.log(f"⬇️ Iniciando download da atualização {tag_name}" + (f" (tentativa {attempt})..." if attempt > 1 else "..."))
+
         def _open_hud():
             if hasattr(self, 'current_hud') and self.current_hud and self.current_hud.winfo_exists():
                 try: self.current_hud.destroy()
@@ -1730,8 +1823,8 @@ class OtimizadorApp(ctk.CTk):
         self.set_hud_progress(5, "Conectando aos servidores do GitHub...")
 
         temp_dir = tempfile.gettempdir()
-        is_installer = asset_name.lower().startswith("setup") or "setup" in asset_name.lower()
-        temp_dest = os.path.join(temp_dir, "BernalOtimizacoes_NovaVersao.exe")
+        is_installer = "setup" in (asset_name or "").lower()
+        temp_dest = os.path.join(temp_dir, f"BernalOtimizacoes_NovaVersao_{attempt}.exe")
 
         try:
             headers = {
@@ -1739,6 +1832,15 @@ class OtimizadorApp(ctk.CTk):
                 "Accept": "*/*"
             }
             self._download_file_robust(download_url, temp_dest, headers, size_hint)
+
+            if attempt != self._update_attempt:
+                # O vigia já começou outra tentativa (ou desistiu): esta não aplica nada
+                try:
+                    os.remove(temp_dest)
+                except Exception:
+                    pass
+                self.log(f"ℹ️ Tentativa {attempt} do download terminou depois do tempo; descartada.")
+                return
 
             # Verificação de integridade / autenticidade do arquivo baixado
             if expected_sha256:
@@ -1762,6 +1864,7 @@ class OtimizadorApp(ctk.CTk):
                 self.log("✅ Integridade confirmada (SHA-256 confere).")
             else:
                 self.log("⚠️ Esta release não publicou hash SHA-256; não foi possível verificar a autenticidade.")
+                self._last_progress_ts = float("inf")  # pausa o vigia enquanto espera a resposta
                 if not self.call_ui(lambda: messagebox.askyesno("Atualização sem verificação",
                         "Esta atualização não trouxe um hash de segurança (SHA-256) para conferência.\n\n"
                         "Instalar mesmo assim? (Recomendado: só continue se você confia na origem.)")):
@@ -1828,28 +1931,12 @@ del "%~f0" >nul 2>&1
             # Encerra o processo atual de forma limpa para liberar o arquivo
             time.sleep(0.3)
             self.after(0, self.destroy)
-            import os
             os._exit(0)
 
-        except Exception as e:
-            self.set_hud_progress(100, "❌ Download automático falhou. Abrindo o navegador...")
-            self.log(f"❌ Erro no Auto-Updater: {e}")
-            fallback_url = "https://github.com/Bernalf5138/Bernal-Otimizacoes/releases/latest"
-
-            def _fallback(m=str(e)):
-                abrir = messagebox.askyesno("Baixar pelo navegador",
-                    "Não consegui baixar a atualização aqui dentro do app "
-                    "(a rede pode estar bloqueando o download direto).\n\n"
-                    "Quer abrir o navegador para baixar a nova versão? "
-                    "É só rodar o arquivo baixado para atualizar — seus dados são mantidos.")
-                if abrir:
-                    try:
-                        webbrowser.open(fallback_url)
-                        self.log("🌐 Página de download aberta no navegador.")
-                    except Exception as ex:
-                        messagebox.showerror("Falha na atualização",
-                            "Baixe manualmente em:\n" + fallback_url + "\n\n" + str(ex)[:300])
-            self.after(0, _fallback)
+        except Exception:
+            # Não use "import os" nesta função: torna "os" local e quebra o os.path lá em cima
+            # (era o que matava o download na V10.6/10.7). O log e o navegador ficam em _run_update_attempt.
+            raise
 
     def setup_nav_sidebar(self):
         self.nav_frame = ctk.CTkFrame(self.body_frame, fg_color="#120E22", width=205, corner_radius=12)

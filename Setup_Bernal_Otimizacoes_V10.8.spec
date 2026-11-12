@@ -88,7 +88,7 @@ exe = EXE(
     a.binaries,
     a.datas,
     [],
-    name='Setup_Bernal_Otimizacoes_V10.7',
+    name='Setup_Bernal_Otimizacoes_V10.8',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
