@@ -22,7 +22,7 @@ import hashlib
 import hmac
 import queue as _queue_mod
 
-APP_VERSION = "10.8"
+APP_VERSION = "10.9"
 
 # --------------------------------------------------------------------------
 # Senhas: nunca em texto puro no código. Para trocar uma senha, rode:
@@ -2723,6 +2723,26 @@ del "%~f0" >nul 2>&1
                 "file": "WP_Futebol_Street.png",
                 "thumb": "thumb_WP_Futebol_Street.png"
             },
+            {
+                "id": "futebol_cr7",
+                "category": "futebol",
+                "tag": "⚽ FUTEBOL & FIFA",
+                "tag_color": "#10B981",
+                "name": "Cristiano Ronaldo (CR7 Siuuu)",
+                "sub": "O Lendário Artilheiro sob os Holofotes da Champions League",
+                "file": "WP_Futebol_CR7.png",
+                "thumb": "thumb_WP_Futebol_CR7.png"
+            },
+            {
+                "id": "futebol_messi",
+                "category": "futebol",
+                "tag": "⚽ FUTEBOL & FIFA",
+                "tag_color": "#10B981",
+                "name": "Lionel Messi (Campeão do Mundo)",
+                "sub": "O Camisa 10 Erguendo a Taça sob Confetes Dourados",
+                "file": "WP_Futebol_Messi.png",
+                "thumb": "thumb_WP_Futebol_Messi.png"
+            },
 
             # 4. FPS & Warzone (3)
             {
@@ -2849,6 +2869,46 @@ del "%~f0" >nul 2>&1
                 "file": "WP_Anime_Cybercity.png",
                 "thumb": "thumb_WP_Anime_Cybercity.png"
             },
+            {
+                "id": "anime_dragonball_goku",
+                "category": "anime",
+                "tag": "⚔️ ANIME & SETUP",
+                "tag_color": "#A855F7",
+                "name": "Dragon Ball - Goku Instinto Superior",
+                "sub": "Goku Mastered Ultra Instinct com Aura Cósmica Divina",
+                "file": "WP_Anime_DragonBall.png",
+                "thumb": "thumb_WP_Anime_DragonBall.png"
+            },
+            {
+                "id": "anime_dragonball_vegeta",
+                "category": "anime",
+                "tag": "⚔️ ANIME & SETUP",
+                "tag_color": "#A855F7",
+                "name": "Dragon Ball - Vegeta Ultra Ego",
+                "sub": "Príncipe Vegeta com Poder Hakai e Chamas Púrpuras",
+                "file": "WP_Anime_Vegeta.png",
+                "thumb": "thumb_WP_Anime_Vegeta.png"
+            },
+            {
+                "id": "anime_naruto_sixpaths",
+                "category": "anime",
+                "tag": "⚔️ ANIME & SETUP",
+                "tag_color": "#A855F7",
+                "name": "Naruto - Sábio dos Seis Caminhos",
+                "sub": "Naruto Rikudou Sennin com Chakra Dourado e Rasengan",
+                "file": "WP_Anime_Naruto.png",
+                "thumb": "thumb_WP_Anime_Naruto.png"
+            },
+            {
+                "id": "anime_naruto_sasuke",
+                "category": "anime",
+                "tag": "⚔️ ANIME & SETUP",
+                "tag_color": "#A855F7",
+                "name": "Naruto - Sasuke Susanoo & Chidori",
+                "sub": "Sasuke com Mangekyo, Rinnegan, Chidori e Armadura Susanoo",
+                "file": "WP_Anime_Sasuke.png",
+                "thumb": "thumb_WP_Anime_Sasuke.png"
+            },
 
             # 7. Jogos Retrô (3)
             {
@@ -2889,13 +2949,13 @@ del "%~f0" >nul 2>&1
 
         self.filter_buttons = {}
         filter_categories = [
-            ("all", "🔥 Todos (30)"),
+            ("all", "🔥 Todos (36)"),
             ("lastofus", "🌿 The Last of Us (5)"),
             ("oficial", "👑 Bernal Oficial (5)"),
-            ("futebol", "⚽ Futebol & FIFA (5)"),
+            ("futebol", "⚽ Futebol & FIFA (7)"),
             ("fps", "🎯 FPS & Warzone (3)"),
             ("veiculos", "🏎️ Carros & Motos (3)"),
-            ("anime", "⚔️ Anime & Setup (6)"),
+            ("anime", "⚔️ Anime & Setup (10)"),
             ("retro", "🕹️ Jogos Retrô (3)"),
             ("meus", "➕ Meus Wallpapers")
         ]

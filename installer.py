@@ -5,7 +5,7 @@ ctk.set_appearance_mode("dark")
 ctk.set_default_color_theme("blue")
 
 INSTALL_DIR  = os.path.join(os.environ.get("LOCALAPPDATA", os.path.expanduser("~")), "Bernal Otimizacoes")
-APP_VERSION  = "10.8"   # única versão do instalador: mude só aqui (igual ao APP_VERSION do OtimizadorGamer.py)
+APP_VERSION  = "10.9"   # única versão do instalador: mude só aqui (igual ao APP_VERSION do OtimizadorGamer.py)
 APP_NAME     = f"Bernal Otimizações Pro V{APP_VERSION}"
 SHORTCUT_NAME = "Bernal Otimizações Pro"   # sem número, para não acumular um atalho por versão
 EXE_NAME     = "BernalOtimizacoes.exe"
@@ -183,16 +183,20 @@ class InstallerApp(ctk.CTk):
                 "Wallpaper_Bernal.png", "WP_Bernal_Gold.png", "WP_Bernal_Prism.png", "WP_Dark.png", "WP_Light.png",
                 "WP_LastOfUs.png", "WP_LastOfUs_Ellie.png", "WP_LastOfUs_Firefly.png", "WP_LastOfUs_Giraffes.png", "WP_LastOfUs_Winter.png",
                 "WP_Futebol.png", "WP_Fifa_Arena.png", "WP_Futebol_Champions.png", "WP_Futebol_Trophy.png", "WP_Futebol_Street.png",
+                "WP_Futebol_CR7.png", "WP_Futebol_Messi.png",
                 "WP_Tactical.png", "WP_Warzone_Sniper.png", "WP_Fps_Nightops.png",
                 "WP_Supercar.png", "WP_Superbike.png", "WP_Drift_GTR.png",
                 "WP_Cyber_Samurai.png", "WP_Ninja.png", "WP_Aura.png", "WP_Cyber.png", "WP_Fem.png", "WP_Anime_Cybercity.png",
+                "WP_Anime_DragonBall.png", "WP_Anime_Vegeta.png", "WP_Anime_Naruto.png", "WP_Anime_Sasuke.png",
                 "WP_Retro_Arcade.png", "WP_Retro_Fighter.png", "WP_Retro_Synthwave.png",
                 "thumb_Wallpaper_Bernal.png", "thumb_WP_Bernal_Gold.png", "thumb_WP_Bernal_Prism.png", "thumb_WP_Dark.png", "thumb_WP_Light.png",
                 "thumb_WP_LastOfUs.png", "thumb_WP_LastOfUs_Ellie.png", "thumb_WP_LastOfUs_Firefly.png", "thumb_WP_LastOfUs_Giraffes.png", "thumb_WP_LastOfUs_Winter.png",
                 "thumb_WP_Futebol.png", "thumb_WP_Fifa_Arena.png", "thumb_WP_Futebol_Champions.png", "thumb_WP_Futebol_Trophy.png", "thumb_WP_Futebol_Street.png",
+                "thumb_WP_Futebol_CR7.png", "thumb_WP_Futebol_Messi.png",
                 "thumb_WP_Tactical.png", "thumb_WP_Warzone_Sniper.png", "thumb_WP_Fps_Nightops.png",
                 "thumb_WP_Supercar.png", "thumb_WP_Superbike.png", "thumb_WP_Drift_GTR.png",
                 "thumb_WP_Cyber_Samurai.png", "thumb_WP_Ninja.png", "thumb_WP_Aura.png", "thumb_WP_Cyber.png", "thumb_WP_Fem.png", "thumb_WP_Anime_Cybercity.png",
+                "thumb_WP_Anime_DragonBall.png", "thumb_WP_Anime_Vegeta.png", "thumb_WP_Anime_Naruto.png", "thumb_WP_Anime_Sasuke.png",
                 "thumb_WP_Retro_Arcade.png", "thumb_WP_Retro_Fighter.png", "thumb_WP_Retro_Synthwave.png"
             ]
             for wall in wallpapers:
