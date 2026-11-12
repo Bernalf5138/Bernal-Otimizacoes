@@ -12,12 +12,12 @@ except Exception:
 
 OWNER = "Bernalf5138"
 REPO = "Bernal-Otimizacoes"
-TAG = "v10.6"
-NAME = "Bernal Otimizações PRO V10.6 Oficial"
+TAG = "v10.7"
+NAME = "Bernal Otimizações PRO V10.7 Oficial"
 
 FILES = [
     (os.path.join("dist", "BernalOtimizacoes.exe"), "BernalOtimizacoes.exe"),
-    (os.path.join("dist", "Setup_Bernal_Otimizacoes_V10.6.exe"), "Setup_Bernal_Otimizacoes_V10.6.exe"),
+    (os.path.join("dist", "Setup_Bernal_Otimizacoes_V10.7.exe"), "Setup_Bernal_Otimizacoes_V10.7.exe"),
 ]
 HASH_ASSET = "BernalOtimizacoes.exe"
 
@@ -43,7 +43,7 @@ def sha256(path):
 def main():
     faltando = [fp for fp, _ in FILES if not os.path.exists(fp)]
     if faltando:
-        print("❌ Os arquivos abaixo não existem ainda. Rode o build V10.6 primeiro:")
+        print("❌ Os arquivos abaixo não existem ainda. Rode o build V10.7 primeiro:")
         for fp in faltando:
             print("   -", fp)
         return False
@@ -63,11 +63,10 @@ def main():
         'User-Agent': 'Bernal-Release-Publisher'
     }
 
-    release_notes = f"""## 🔧 Bernal Otimizações Pro V10.6
+    release_notes = f"""## 🔧 Bernal Otimizações Pro V10.7
 
-- 🌙 **Modo Escuro agora muda de verdade na hora:** ao aplicar um wallpaper escuro/claro, a cor das janelas E da barra de tarefas troca na mesma hora (o Explorer é reiniciado automaticamente para aplicar o tema).
-- ➕ **Meus Wallpapers:** importe qualquer imagem do seu PC para a galeria.
-- ↩️ Tudo reversível no botão Reverter.
+- 🛠️ **Atualizador corrigido:** quando o download da atualização falha, o app agora mostra o erro certo em vez de travar.
+- 🧹 Limpeza de arquivos antigos do projeto.
 
 SHA256: {digest}
 """
@@ -76,7 +75,7 @@ SHA256: {digest}
     req = urllib.request.Request(rel_url, headers=headers)
     with urllib.request.urlopen(req) as resp:
         releases = json.loads(resp.read().decode('utf-8'))
-    target = next((r for r in releases if r.get('tag_name') in (TAG, "10.6")), None)
+    target = next((r for r in releases if r.get('tag_name') in (TAG, "10.7")), None)
 
     if not target:
         print(f"📦 Criando release {TAG}...")
@@ -123,7 +122,7 @@ SHA256: {digest}
                 res = json.loads(ur.read().decode('utf-8'))
                 print(f"  ✅ {res.get('browser_download_url')}")
 
-    print("\n🎉 Release V10.6 publicada! Os clientes nas versões antigas vão receber o aviso de atualização.")
+    print("\n🎉 Release V10.7 publicada! Os clientes nas versões antigas vão receber o aviso de atualização.")
     return True
 
 
