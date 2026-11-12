@@ -24,7 +24,8 @@ SETUP_NAME = f"Setup_Bernal_Otimizacoes_V{VERSION}.exe"
 
 # Novidades desta versão (troque a cada release)
 NOTES = """
-- 🔄 Versão de manutenção: confirma a atualização automática (GitHub e nuvem) para todos os clientes.
+- 🔄 **Atualização sem janela do CMD** e o app **abre sozinho** quando termina de atualizar.
+- 🏷️ O nome na pesquisa do Windows, no Menu Iniciar e em "Aplicativos instalados" agora mostra a versão atual.
 - 🚀 Ajustes de estabilidade.
 """
 

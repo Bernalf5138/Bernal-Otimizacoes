@@ -22,7 +22,7 @@ import hashlib
 import hmac
 import queue as _queue_mod
 
-APP_VERSION = "11.1"
+APP_VERSION = "11.2"
 
 # --------------------------------------------------------------------------
 # Senhas: nunca em texto puro no código. Para trocar uma senha, rode:
@@ -50,6 +50,47 @@ def check_master_login(user, password):
 
 def check_audit_password(password):
     return hmac.compare_digest(_pbkdf2(password, AUDIT_SALT), AUDIT_PASS_HASH)
+
+
+def sync_install_name():
+    """A atualização automática só troca o .exe: atalhos e "Aplicativos instalados" continuavam
+    com a versão antiga (ex.: "Bernal Otimizações Pro V10.4" na pesquisa). Aqui eles passam para
+    a versão atual. Só mexe em atalhos com o nome exato do app."""
+    import glob
+    import winreg
+    name = f"Bernal Otimizações Pro V{APP_VERSION}"
+    padrao = re.compile(r"^Bernal Otimiza(ç|c)(õ|o)es Pro( V[\d.]+)?\.lnk$", re.I)
+
+    sm_root = os.path.join(os.environ.get("APPDATA", ""), r"Microsoft\Windows\Start Menu\Programs")
+    pastas = [sm_root, os.path.join(sm_root, "Bernal Otimizacoes")]
+    try:
+        k = winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"Software\Microsoft\Windows\CurrentVersion\Explorer\User Shell Folders")
+        pastas.append(os.path.expandvars(winreg.QueryValueEx(k, "Desktop")[0]))
+        winreg.CloseKey(k)
+    except Exception:
+        pastas.append(os.path.join(os.path.expanduser("~"), "Desktop"))
+
+    for pasta in pastas:
+        destino = os.path.join(pasta, name + ".lnk")
+        antigos = [p for p in glob.glob(os.path.join(pasta, "Bernal Otimiza*.lnk"))
+                   if padrao.match(os.path.basename(p)) and os.path.basename(p) != name + ".lnk"]
+        for p in antigos:
+            try:
+                if os.path.exists(destino):
+                    os.remove(p)              # já tem o atalho certo: tira o repetido
+                else:
+                    os.replace(p, destino)    # renomeia mantendo para onde o atalho aponta
+            except Exception:
+                pass
+
+    try:
+        k = winreg.OpenKey(winreg.HKEY_CURRENT_USER,
+                           r"Software\Microsoft\Windows\CurrentVersion\Uninstall\BernalOtimizacoes", 0, winreg.KEY_ALL_ACCESS)
+        winreg.SetValueEx(k, "DisplayName", 0, winreg.REG_SZ, name)
+        winreg.SetValueEx(k, "DisplayVersion", 0, winreg.REG_SZ, APP_VERSION)
+        winreg.CloseKey(k)
+    except Exception:
+        pass   # instalado sem o instalador: não há registro para corrigir
 
 
 def get_machine_id():
@@ -1306,6 +1347,9 @@ class OtimizadorApp(ctk.CTk):
         self.log(f"Aplicativo Inicializado V{APP_VERSION}.")
         self.log("Aguardando leitura de Hardware...")
 
+        # Atalhos e "Aplicativos instalados" com o nome da versão atual
+        threading.Thread(target=sync_install_name, daemon=True).start()
+
         # Verificação silenciosa de atualização na nuvem (GitHub)
         self.after(3500, lambda: threading.Thread(target=self.check_for_updates, kwargs={'manual': False}, daemon=True).start())
 
@@ -1923,10 +1967,8 @@ del "%~f0" >nul 2>&1
                 f_bat.write(bat_content)
 
             self.log(f"🔄 Executando reinício e auto-atualização para {tag_name}...")
-            si_bat = subprocess.STARTUPINFO()
-            si_bat.dwFlags |= subprocess.STARTF_USESHOWWINDOW
-            si_bat.wShowWindow = 0
-            subprocess.Popen(f'cmd.exe /c "{bat_path}"', shell=True, startupinfo=si_bat, creationflags=subprocess.CREATE_NO_WINDOW)
+            # Sem janela de CMD e sem herdar o ambiente do PyInstaller (senão o app novo não abre)
+            cloud.launch_restart_script(["cmd.exe", "/c", bat_path])
             
             # Encerra o processo atual de forma limpa para liberar o arquivo
             time.sleep(0.3)

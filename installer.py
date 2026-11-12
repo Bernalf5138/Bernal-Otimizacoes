@@ -5,9 +5,9 @@ ctk.set_appearance_mode("dark")
 ctk.set_default_color_theme("blue")
 
 INSTALL_DIR  = os.path.join(os.environ.get("LOCALAPPDATA", os.path.expanduser("~")), "Bernal Otimizacoes")
-APP_VERSION  = "11.1"   # única versão do instalador: mude só aqui (igual ao APP_VERSION do OtimizadorGamer.py)
+APP_VERSION  = "11.2"   # única versão do instalador: mude só aqui (igual ao APP_VERSION do OtimizadorGamer.py)
 APP_NAME     = f"Bernal Otimizações Pro V{APP_VERSION}"
-SHORTCUT_NAME = "Bernal Otimizações Pro"   # sem número, para não acumular um atalho por versão
+SHORTCUT_NAME = APP_NAME   # com a versão (é o que aparece na pesquisa); o app renomeia sozinho ao se atualizar
 EXE_NAME     = "BernalOtimizacoes.exe"
 def get_desktop_path():
     try:
@@ -242,7 +242,7 @@ class InstallerApp(ctk.CTk):
             # Apaga atalhos de versões antigas ("Bernal Otimizações Pro V10.4.lnk" etc.)
             import glob
             for d in (DESKTOP_PATH, sm_dir, sm_root_dir):
-                for old in glob.glob(os.path.join(d, "Bernal Otimiza* V*.lnk")):
+                for old in glob.glob(os.path.join(d, "Bernal Otimiza*.lnk")):
                     try:
                         os.remove(old)
                     except Exception:
@@ -282,7 +282,8 @@ class InstallerApp(ctk.CTk):
                 'echo echo. >> "%temp%\\run_uninst.bat"',
                 'echo echo Excluindo arquivos e pastas do aplicativo... >> "%temp%\\run_uninst.bat"',
                 f'echo rmdir /s /q "{INSTALL_DIR}" >> "%temp%\\run_uninst.bat"',
-                f'echo del /f /q "{desktop_lnk}" >> "%temp%\\run_uninst.bat"',
+                f'echo del /f /q "{os.path.join(DESKTOP_PATH, "Bernal Otimiza*.lnk")}" >> "%temp%\\run_uninst.bat"',
+                f'echo del /f /q "{os.path.join(sm_root_dir, "Bernal Otimiza*.lnk")}" >> "%temp%\\run_uninst.bat"',
                 f'echo rmdir /s /q "{sm_dir}" >> "%temp%\\run_uninst.bat"',
                 'echo reg delete "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\BernalOtimizacoes" /f >> "%temp%\\run_uninst.bat"',
                 'echo echo INICIANDO RESTAURACAO DO SISTEMA (O PC SERA REINICIADO AGORA)... >> "%temp%\\run_uninst.bat"',
