@@ -24,8 +24,7 @@ SETUP_NAME = f"Setup_Bernal_Otimizacoes_V{VERSION}.exe"
 
 # Novidades desta versão (troque a cada release)
 NOTES = """
-- 🔄 **Atualização automática mais confiável:** o app agora confere também o GitHub quando a nuvem ainda não tem a versão nova, então ninguém fica sem o aviso.
-- 🎨 Wallpapers Anime & Futebol 4K com nomes novos: Guerreiro Lendário, Príncipe Guerreiro, Ninja da Raposa, Ninja Vingador, Artilheiro Lendário Camisa 7 e Camisa 10 Campeão do Mundo.
+- 🔄 Versão de manutenção: confirma a atualização automática (GitHub e nuvem) para todos os clientes.
 - 🚀 Ajustes de estabilidade.
 """
 

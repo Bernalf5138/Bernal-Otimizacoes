@@ -5,7 +5,7 @@ ctk.set_appearance_mode("dark")
 ctk.set_default_color_theme("blue")
 
 INSTALL_DIR  = os.path.join(os.environ.get("LOCALAPPDATA", os.path.expanduser("~")), "Bernal Otimizacoes")
-APP_VERSION  = "11.0"   # única versão do instalador: mude só aqui (igual ao APP_VERSION do OtimizadorGamer.py)
+APP_VERSION  = "11.1"   # única versão do instalador: mude só aqui (igual ao APP_VERSION do OtimizadorGamer.py)
 APP_NAME     = f"Bernal Otimizações Pro V{APP_VERSION}"
 SHORTCUT_NAME = "Bernal Otimizações Pro"   # sem número, para não acumular um atalho por versão
 EXE_NAME     = "BernalOtimizacoes.exe"
