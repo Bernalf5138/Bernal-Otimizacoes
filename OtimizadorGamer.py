@@ -22,7 +22,7 @@ import hashlib
 import hmac
 import queue as _queue_mod
 
-APP_VERSION = "10.5"
+APP_VERSION = "10.6"
 
 # --------------------------------------------------------------------------
 # Senhas: nunca em texto puro no código. Para trocar uma senha, rode:
@@ -1636,7 +1636,7 @@ class OtimizadorApp(ctk.CTk):
         try:
             self.set_hud_progress(5, "Conectando ao GitHub (método 1/3)...")
             req = urllib.request.Request(url, headers=headers)
-            with urllib.request.urlopen(req, timeout=12) as resp:
+            with urllib.request.urlopen(req, timeout=10) as resp:
                 total = int(resp.headers.get("content-length", 0) or 0) or size_hint
                 done, t_last = 0, time.time()
                 self.set_hud_progress(6, "Conectado! Baixando atualização...")
@@ -1663,7 +1663,7 @@ class OtimizadorApp(ctk.CTk):
             self.set_hud_progress(5, "Conectando ao GitHub (método 2/3: curl)...")
             cflags = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
             proc = subprocess.Popen(["curl.exe", "-L", "-4", "--fail", "--silent", "--show-error",
-                                     "--connect-timeout", "15", "--retry", "3", "-A", headers.get("User-Agent", "Mozilla/5.0"),
+                                     "--connect-timeout", "10", "--retry", "2", "-A", headers.get("User-Agent", "Mozilla/5.0"),
                                      "-o", dest, url], stdout=subprocess.PIPE, stderr=subprocess.PIPE, creationflags=cflags)
             t0, last_size, last_move = time.time(), -1, time.time()
             while proc.poll() is None:
@@ -1673,9 +1673,9 @@ class OtimizadorApp(ctk.CTk):
                     last_size, last_move = cur, time.time()
                 if cur > 0:
                     _show(cur, size_hint)
-                if time.time() - last_move > 45:
+                if time.time() - last_move > 20:
                     proc.kill()
-                    raise IOError("sem progresso por 45s")
+                    raise IOError("sem progresso por 20s")
             if proc.returncode != 0:
                 raise IOError((proc.stderr.read() or b"").decode("utf-8", "replace").strip() or f"curl código {proc.returncode}")
             if size_hint and os.path.getsize(dest) < size_hint * 0.9:
@@ -1701,9 +1701,9 @@ class OtimizadorApp(ctk.CTk):
                     last_size, last_move = cur, time.time()
                 if cur > 0:
                     _show(cur, size_hint)
-                if time.time() - last_move > 60:
+                if time.time() - last_move > 25:
                     proc.kill()
-                    raise IOError("sem progresso por 60s")
+                    raise IOError("sem progresso por 25s")
             if proc.returncode != 0:
                 raise IOError((proc.stderr.read() or b"").decode("utf-8", "replace").strip()[:200] or "BITS falhou")
             return True
@@ -1832,10 +1832,24 @@ del "%~f0" >nul 2>&1
             os._exit(0)
 
         except Exception as e:
-            self.set_hud_progress(100, f"❌ Erro ao baixar atualização: {e}")
+            self.set_hud_progress(100, "❌ Download automático falhou. Abrindo o navegador...")
             self.log(f"❌ Erro no Auto-Updater: {e}")
-            self.after(0, lambda m=str(e): messagebox.showerror("Falha na atualização",
-                "Não consegui baixar a atualização automaticamente.\n\n" + m[:600]))
+            fallback_url = "https://github.com/Bernalf5138/Bernal-Otimizacoes/releases/latest"
+
+            def _fallback(m=str(e)):
+                abrir = messagebox.askyesno("Baixar pelo navegador",
+                    "Não consegui baixar a atualização aqui dentro do app "
+                    "(a rede pode estar bloqueando o download direto).\n\n"
+                    "Quer abrir o navegador para baixar a nova versão? "
+                    "É só rodar o arquivo baixado para atualizar — seus dados são mantidos.")
+                if abrir:
+                    try:
+                        webbrowser.open(fallback_url)
+                        self.log("🌐 Página de download aberta no navegador.")
+                    except Exception as ex:
+                        messagebox.showerror("Falha na atualização",
+                            "Baixe manualmente em:\n" + fallback_url + "\n\n" + str(ex)[:300])
+            self.after(0, _fallback)
 
     def setup_nav_sidebar(self):
         self.nav_frame = ctk.CTkFrame(self.body_frame, fg_color="#120E22", width=205, corner_radius=12)
@@ -2996,13 +3010,43 @@ del "%~f0" >nul 2>&1
                 elif "light" in nome or "claro" in nome or "white" in nome or "branco" in nome:
                     theme_val = 1  # claro
                 if theme_val is not None:
-                    self.run_cmd_live(f'reg add "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize" /v "AppsUseLightTheme" /t REG_DWORD /d {theme_val} /f')
-                    self.run_cmd_live(f'reg add "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize" /v "SystemUsesLightTheme" /t REG_DWORD /d {theme_val} /f')
-                    # Avisa o Windows para atualizar a cor/barra de tarefas na hora (sem reiniciar)
+                    kpath = r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize"
+                    changed = True
+                    try:
+                        import winreg
+                        try:
+                            rk = winreg.OpenKey(winreg.HKEY_CURRENT_USER, kpath)
+                            cur_val, _ = winreg.QueryValueEx(rk, "SystemUsesLightTheme")
+                            winreg.CloseKey(rk)
+                            changed = (int(cur_val) != theme_val)
+                        except Exception:
+                            changed = True
+                        rk = winreg.CreateKey(winreg.HKEY_CURRENT_USER, kpath)
+                        winreg.SetValueEx(rk, "AppsUseLightTheme", 0, winreg.REG_DWORD, theme_val)
+                        winreg.SetValueEx(rk, "SystemUsesLightTheme", 0, winreg.REG_DWORD, theme_val)
+                        winreg.CloseKey(rk)
+                    except Exception:
+                        self.run_cmd_live(f'reg add "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize" /v "AppsUseLightTheme" /t REG_DWORD /d {theme_val} /f')
+                        self.run_cmd_live(f'reg add "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize" /v "SystemUsesLightTheme" /t REG_DWORD /d {theme_val} /f')
+                    # Avisa os apps abertos para trocarem a cor
                     try:
                         ctypes.windll.user32.SendMessageTimeoutW(0xFFFF, 0x001A, 0, "ImmersiveColorSet", 0x0002, 5000, None)
                     except Exception:
                         pass
+                    # A barra de tarefas/menu Iniciar só pega o tema novo reiniciando o Explorer
+                    if changed:
+                        try:
+                            si = subprocess.STARTUPINFO()
+                            si.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+                            subprocess.run(["taskkill", "/f", "/im", "explorer.exe"],
+                                           startupinfo=si, creationflags=subprocess.CREATE_NO_WINDOW,
+                                           capture_output=True)
+                        except Exception:
+                            pass
+                        try:
+                            subprocess.Popen("explorer.exe")
+                        except Exception:
+                            pass
                     self.log("✅ Modo Escuro aplicado!" if theme_val == 0 else "✅ Modo Claro aplicado!")
                 self.log(f"✅ Papel de Parede '{title}' aplicado com sucesso no Windows!")
                 messagebox.showinfo("Sucesso", f"Papel de Parede '{title}' aplicado com sucesso na sua Área de Trabalho!")
