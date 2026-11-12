@@ -22,7 +22,7 @@ import hashlib
 import hmac
 import queue as _queue_mod
 
-APP_VERSION = "10.4"
+APP_VERSION = "10.5"
 
 # --------------------------------------------------------------------------
 # Senhas: nunca em texto puro no código. Para trocar uma senha, rode:
@@ -2795,7 +2795,8 @@ del "%~f0" >nul 2>&1
             ("fps", "🎯 FPS & Warzone (3)"),
             ("veiculos", "🏎️ Carros & Motos (3)"),
             ("anime", "⚔️ Anime & Setup (6)"),
-            ("retro", "🕹️ Jogos Retrô (3)")
+            ("retro", "🕹️ Jogos Retrô (3)"),
+            ("meus", "➕ Meus Wallpapers")
         ]
 
         f_inner = ctk.CTkFrame(filter_bar, fg_color="transparent")
@@ -2839,9 +2840,32 @@ del "%~f0" >nul 2>&1
 
         # Filter items
         if selected_category == "all":
-            filtered = self.wallpapers_data
+            filtered = [wp for wp in self.wallpapers_data if wp.get("category") != "meus"]
+        elif selected_category == "meus":
+            filtered = self._load_user_wallpapers()
         else:
             filtered = [wp for wp in self.wallpapers_data if wp.get("category") == selected_category]
+
+        # Barra de importação na aba "Meus Wallpapers"
+        if selected_category == "meus":
+            bar = ctk.CTkFrame(self.wallpapers_grid_container, fg_color="#151028", corner_radius=10)
+            bar.pack(fill="x", pady=(0, 8))
+            ctk.CTkLabel(
+                bar,
+                text="📁 Adicione seus próprios wallpapers (qualquer imagem do PC):",
+                font=ctk.CTkFont(size=11), text_color="#9CA3AF"
+            ).pack(side="left", padx=12, pady=8)
+            ctk.CTkButton(
+                bar, text="➕ Importar Imagem", font=ctk.CTkFont(size=11, weight="bold"),
+                fg_color="#22C55E", hover_color="#16A34A", text_color="#06240F", height=30,
+                command=self.import_wallpaper_dialog
+            ).pack(side="right", padx=12, pady=8)
+            if not filtered:
+                ctk.CTkLabel(
+                    self.wallpapers_grid_container,
+                    text="Nenhum wallpaper importado ainda. Clique em '➕ Importar Imagem' para adicionar.",
+                    font=ctk.CTkFont(size=12), text_color="#6B7280"
+                ).pack(pady=20)
 
         grid_frame = ctk.CTkFrame(self.wallpapers_grid_container, fg_color="transparent")
         grid_frame.pack(fill="both", expand=True)
@@ -2988,6 +3012,67 @@ del "%~f0" >nul 2>&1
             self.log(f"❌ Imagem não encontrada: {wall_name}")
             messagebox.showerror("Erro", f"Arquivo de imagem não encontrado: {wall_name}")
 
+    def get_user_wall_dir(self):
+        """Pasta onde ficam os wallpapers importados pelo usuário/cliente."""
+        localapp = os.environ.get("LOCALAPPDATA", os.path.expanduser("~"))
+        d = os.path.join(localapp, "Bernal Otimizacoes", "MeusWallpapers")
+        try:
+            os.makedirs(d, exist_ok=True)
+        except Exception:
+            pass
+        return d
+
+    def _load_user_wallpapers(self):
+        """Lê a pasta de wallpapers importados e monta os cards da galeria."""
+        d = self.get_user_wall_dir()
+        exts = (".png", ".jpg", ".jpeg", ".bmp", ".webp")
+        items = []
+        try:
+            for fn in sorted(os.listdir(d)):
+                if fn.lower().endswith(exts):
+                    full = os.path.join(d, fn)
+                    items.append({
+                        "id": "user_" + fn,
+                        "category": "meus",
+                        "tag": "📁 MEU WALLPAPER",
+                        "tag_color": "#22C55E",
+                        "name": os.path.splitext(fn)[0][:28],
+                        "sub": "Wallpaper importado por você",
+                        "file": full,
+                        "thumb": full,
+                    })
+        except Exception:
+            pass
+        return items
+
+    def import_wallpaper_dialog(self):
+        """Deixa o usuário escolher imagens do PC e as adiciona à galeria 'Meus Wallpapers'."""
+        from tkinter import filedialog
+        import shutil
+        paths = filedialog.askopenfilenames(
+            title="Escolha as imagens para adicionar à galeria",
+            filetypes=[("Imagens", "*.png *.jpg *.jpeg *.bmp *.webp"), ("Todos os arquivos", "*.*")]
+        )
+        if not paths:
+            return
+        dest = self.get_user_wall_dir()
+        n = 0
+        for p in paths:
+            try:
+                shutil.copy2(p, os.path.join(dest, os.path.basename(p)))
+                n += 1
+            except Exception as e:
+                self.log(f"❌ Erro ao importar {os.path.basename(p)}: {e}")
+        self.log(f"✅ {n} wallpaper(s) importado(s) para a galeria 'Meus Wallpapers'.")
+        # Limpa thumbs importados do cache para recarregar e atualiza a aba
+        try:
+            self.cached_thumbnails = {k: v for k, v in self.cached_thumbnails.items() if not os.path.isabs(k)}
+        except Exception:
+            pass
+        try:
+            self.filter_wallpapers_grid("meus")
+        except Exception:
+            pass
 
     def create_view_perfis(self, parent):
         scroll = ctk.CTkScrollableFrame(parent, fg_color="transparent")
