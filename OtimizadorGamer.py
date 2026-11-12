@@ -1542,10 +1542,10 @@ class OtimizadorApp(ctk.CTk):
                     ))
             else:
                 if manual:
-                    self.after(0, lambda: messagebox.showwarning("Aviso", f"Não foi possível verificar atualizações no momento.\nCódigo: {e.code}"))
+                    self.after(0, lambda code=e.code: messagebox.showwarning("Aviso", f"Não foi possível verificar atualizações no momento.\nCódigo: {code}"))
         except Exception as e:
             if manual:
-                self.after(0, lambda: messagebox.showwarning("Aviso", f"Falha na conexão com a nuvem de atualizações:\n{e}"))
+                self.after(0, lambda msg=str(e): messagebox.showwarning("Aviso", f"Falha na conexão com a nuvem de atualizações:\n{msg}"))
 
     def show_update_available_dialog(self, info):
         """Abre janela moderna avisando da nova versão."""
