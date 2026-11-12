@@ -14,7 +14,75 @@ from tkinter import messagebox
 import glob
 import shutil
 import idiomas as lang
+import extras
+import bernal_cloud as cloud
 from PIL import Image, ImageTk
+import re
+import hashlib
+import hmac
+import queue as _queue_mod
+
+APP_VERSION = "10.4"
+
+# --------------------------------------------------------------------------
+# Senhas: nunca em texto puro no código. Para trocar uma senha, rode:
+#   python -c "import hashlib;print(hashlib.pbkdf2_hmac('sha256',b'NOVA_SENHA',b'bernal-master-v1',200000).hex())"
+# e cole o resultado em MASTER_PASS_HASH (use o salt 'bernal-audit-v1' para AUDIT_PASS_HASH).
+# --------------------------------------------------------------------------
+MASTER_USER = "Bernal"
+MASTER_SALT = b"bernal-master-v1"
+MASTER_PASS_HASH = "814d90585b1ba6d4b7ee5e762b7fad43ed0026b77f26d8b0d92044ff9d0c16e5"
+AUDIT_SALT = b"bernal-audit-v1"
+AUDIT_PASS_HASH = "7ef216fe2555665900026469dd2ed110c168fb85e99f6f14f30ccaf3a0071bf7"
+
+
+def _pbkdf2(password, salt):
+    return hashlib.pbkdf2_hmac("sha256", (password or "").encode("utf-8"), salt, 200000).hex()
+
+
+def check_master_password(password):
+    return hmac.compare_digest(_pbkdf2(password, MASTER_SALT), MASTER_PASS_HASH)
+
+
+def check_master_login(user, password):
+    return (user or "").strip() == MASTER_USER and check_master_password(password)
+
+
+def check_audit_password(password):
+    return hmac.compare_digest(_pbkdf2(password, AUDIT_SALT), AUDIT_PASS_HASH)
+
+
+def get_machine_id():
+    """ID único do Windows (MachineGuid). Usado para prender a licença a este PC."""
+    try:
+        import winreg
+        k = winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\Microsoft\Cryptography", 0,
+                           winreg.KEY_READ | getattr(winreg, "KEY_WOW64_64KEY", 0))
+        v, _ = winreg.QueryValueEx(k, "MachineGuid")
+        winreg.CloseKey(k)
+        return str(v)
+    except Exception:
+        return os.environ.get("COMPUTERNAME", "desconhecido")
+
+
+def machine_fingerprint():
+    return hashlib.sha256(("bernal-lic|" + get_machine_id()).encode("utf-8")).hexdigest()
+
+
+
+def is_running_as_admin():
+    try:
+        return bool(ctypes.windll.shell32.IsUserAnAdmin())
+    except Exception:
+        return False
+
+
+_TK_MAIN_THREAD = threading.main_thread()
+
+
+def _on_main_thread():
+    return threading.current_thread() is _TK_MAIN_THREAD
+
 def ensure_admin_elevation():
     try:
         if not ctypes.windll.shell32.IsUserAnAdmin():
@@ -185,25 +253,56 @@ class CyberProgressHUD(ctk.CTkToplevel):
         
         bot = ctk.CTkFrame(b, fg_color="transparent")
         bot.pack(fill="x", padx=18, pady=(0, 10))
-        ctk.CTkLabel(bot, text="🛡️ Modo Seguro • Calibração em Tempo Real • Anti-Cheat Safe", font=ctk.CTkFont(size=9), text_color="#6B7280").pack(side="left")
+        ctk.CTkLabel(bot, text="🛡️ Ponto de restauração criado ao abrir o app • Veja detalhes no Log", font=ctk.CTkFont(size=9), text_color="#6B7280").pack(side="left")
+
+        # Sem porcentagem real ainda: barra animada (indeterminada) em vez de números inventados
+        self._determinate = False
+        self.lbl_pct.configure(text="...")
+        try:
+            self.bar.configure(mode="indeterminate")
+            self.bar.start()
+        except Exception:
+            pass
 
     def update_progress(self, pct, msg=None):
         try:
+            if not self._determinate:
+                self._determinate = True
+                try:
+                    self.bar.stop()
+                    self.bar.configure(mode="determinate")
+                except Exception:
+                    pass
             p = max(0, min(100, int(pct)))
             self.bar.set(p / 100.0)
             self.lbl_pct.configure(text=f"{p}%")
             if msg:
                 self.lbl_msg.configure(text=msg)
-            self.update_idletasks()
         except Exception:
             pass
 
-    def finish(self, msg="✅ 100% Concluído com Sucesso!"):
+    def set_message(self, msg):
         try:
-            self.update_progress(100, msg)
-            self.lbl_pct.configure(text_color="#10B981")
-            self.bar.configure(progress_color="#10B981")
-            self.after(650, self.destroy)
+            self.lbl_msg.configure(text=str(msg)[:160])
+        except Exception:
+            pass
+
+    def finish(self, msg="✅ Concluído!", ok=True):
+        try:
+            if not self._determinate:
+                self._determinate = True
+                try:
+                    self.bar.stop()
+                    self.bar.configure(mode="determinate")
+                except Exception:
+                    pass
+            self.bar.set(1.0)
+            self.lbl_pct.configure(text="OK" if ok else "!")
+            self.lbl_msg.configure(text=msg)
+            color = "#10B981" if ok else "#F59E0B"
+            self.lbl_pct.configure(text_color=color)
+            self.bar.configure(progress_color=color)
+            self.after(900 if ok else 2600, self.destroy)
         except Exception:
             try: self.destroy()
             except: pass
@@ -218,7 +317,7 @@ class OtimizadorApp(ctk.CTk):
         
         self.current_lang = "pt"
 
-        self.title("Bernal Otimizações PRO - V9.3 (Edição Definitiva)")
+        self.title(f"Bernal Otimizações PRO - V{APP_VERSION}")
         sw = self.winfo_screenwidth()
         sh = self.winfo_screenheight()
         w, h = 1220, 760
@@ -246,9 +345,15 @@ class OtimizadorApp(ctk.CTk):
         self.is_trial = False
         self.trial_time_left = 3600
         self.audit_log_path = r"C:\Users\Public\Documents\Bernal_Auditoria.log"
-        self.license_path = r"C:\Users\Public\Documents\Bernal_License.json"
-        
+
         self.cached_thumbnails = {}
+        self.current_user = ""
+        self._audit_lock = threading.Lock()
+        self._tls = threading.local()
+        self.trial_state_path = r"C:\Users\Public\Documents\Bernal_Trial.json"
+        self.cloud_session = False
+        cloud.init(APP_VERSION)
+        self._install_thread_safe_dialogs()
         # Initially hide the main app until login
         self.withdraw()
         
@@ -259,19 +364,106 @@ class OtimizadorApp(ctk.CTk):
         
         # Ensure any legacy noisy auto clean task is upgraded to silent
         self.after(2000, self.silence_legacy_tasks)
+        self.after(8000, self._fps_autostart)
+
+    def _fps_autostart(self):
+        try:
+            cfg = self._fps_load_cfg()
+            if cfg.get("watch") and cfg.get("games"):
+                self.start_fps_watcher()
+        except Exception:
+            pass
 
     def t(self, key):
         return lang.TRANSLATIONS.get(self.current_lang, {}).get(key, key)
 
     def process_gui_queue(self):
-        import queue
         try:
-            while True:
+            for _ in range(200):
                 task = self.gui_queue.get_nowait()
-                task()
-        except queue.Empty:
+                try:
+                    task()
+                except Exception as e:
+                    try:
+                        print(f"[UI] erro em tarefa: {e}")
+                    except Exception:
+                        pass
+        except _queue_mod.Empty:
             pass
-        self.after(100, self.process_gui_queue)
+        super().after(40, self.process_gui_queue)
+
+    # ------------------------------------------------------------------
+    # Thread-safety: Tkinter/CustomTkinter só podem ser usados na thread
+    # principal. Tudo que vem de threads de trabalho passa pela gui_queue.
+    # ------------------------------------------------------------------
+    def after(self, ms, func=None, *args):
+        if _on_main_thread() or func is None:
+            return super().after(ms, func, *args)
+        if ms and int(ms) > 0:
+            self.gui_queue.put(lambda: super(OtimizadorApp, self).after(ms, func, *args))
+        else:
+            self.gui_queue.put(lambda: func(*args))
+        return None
+
+    def call_ui(self, fn, *args, wait=True, timeout=None):
+        """Executa fn na thread da interface. Com wait=True devolve o resultado."""
+        if _on_main_thread():
+            return fn(*args)
+        if not wait:
+            self.gui_queue.put(lambda: fn(*args))
+            return None
+        done = threading.Event()
+        box = {}
+        def _run():
+            try:
+                box["r"] = fn(*args)
+            except Exception as e:
+                box["e"] = e
+            finally:
+                done.set()
+        self.gui_queue.put(_run)
+        done.wait(timeout)
+        if "e" in box:
+            raise box["e"]
+        return box.get("r")
+
+    def _run_dialog_above_hud(self, o, a, kw):
+        """Mostra a caixa de mensagem SEMPRE na frente do HUD de progresso.
+        O HUD é 'topmost'; aqui ele é rebaixado enquanto a caixa está aberta e restaurado depois."""
+        hud = getattr(self, 'current_hud', None)
+        dropped = False
+        try:
+            if hud is not None and hud.winfo_exists():
+                hud.attributes("-topmost", False)
+                hud.lower()
+                dropped = True
+        except Exception:
+            pass
+        try:
+            return o(*a, **kw)
+        finally:
+            if dropped:
+                try:
+                    if hud.winfo_exists():
+                        hud.attributes("-topmost", True)
+                        hud.lift()
+                except Exception:
+                    pass
+
+    def _install_thread_safe_dialogs(self):
+        app = self
+        for name in ("showinfo", "showwarning", "showerror", "askyesno", "askokcancel", "askyesnocancel", "askquestion"):
+            orig = getattr(messagebox, name, None)
+            if orig is None or getattr(orig, "_bernal_safe", False):
+                continue
+            def make(o):
+                def safe(*a, **kw):
+                    if _on_main_thread():
+                        return app._run_dialog_above_hud(o, a, kw)
+                    return app.call_ui(lambda: app._run_dialog_above_hud(o, a, kw), wait=True)
+                safe._bernal_safe = True
+                return safe
+            setattr(messagebox, name, make(orig))
 
     def show_splash(self):
         """Animated splash screen shown before login."""
@@ -299,7 +491,7 @@ class OtimizadorApp(ctk.CTk):
                                    font=("Arial", 52), fill="#00d4ff")
         title = canvas.create_text(w//2, 160, text="Bernal Otimizações Pro",
                                     font=("Arial", 20, "bold"), fill="white")
-        subtitle = canvas.create_text(w//2, 190, text="Versão 9.3  •  Performance Máxima Definitiva",
+        subtitle = canvas.create_text(w//2, 190, text=f"Versão {APP_VERSION}  •  Performance e Estabilidade",
                                        font=("Arial", 11), fill="#00D2FF")
         status = canvas.create_text(w//2, 240, text="Iniciando...",
                                      font=("Arial", 10), fill="#00d4ff")
@@ -321,10 +513,9 @@ class OtimizadorApp(ctk.CTk):
         def animate(i=0):
             if i >= len(steps):
                 splash.destroy()
-                if os.path.exists(self.license_path):
-                    self.show_login_screen()
-                else:
-                    self.show_activation_screen()
+                if self.try_cloud_login():
+                    return
+                self.show_license_screen()
                 return
             prog, msg = steps[i]
             bar_w = int((w - 120) * prog)
@@ -348,228 +539,197 @@ class OtimizadorApp(ctk.CTk):
             # Se não tiver o app do Discord, abre no navegador
             webbrowser.open("https://discord.com/app")
 
-    def show_activation_screen(self):
+    # --- Licença na nuvem (mesmo servidor de chaves do BSO) ---
+    def try_cloud_login(self):
+        """Se há chave salva e válida (reconferida no servidor), entra direto, sem pedir login."""
+        try:
+            cloud.evaluate()
+            if cloud.saved_key() and not cloud.is_valid():
+                cloud.recheck()           # pode falar com o servidor (até ~15 s)
+            if cloud.is_valid():
+                self._enter_with_cloud_license()
+                return True
+        except Exception:
+            pass
+        return False
+
+    def _enter_with_cloud_license(self):
+        st = cloud.status()
+        self.cloud_session = True
+        self.is_admin = False
+        self.current_user = st.get("customer") or "Cliente"
+        self.show_eula_screen(self.current_user)
+
+    def _cloud_license_lost(self, st):
+        def _msg():
+            messagebox.showwarning("Licença", (st.get("message") or "Sua licença não está mais válida.") +
+                                   "\n\nO aplicativo será fechado. Fale com o suporte para renovar.")
+            self.destroy()
+        self.after(0, _msg)
+
+    def build_cloud_key_box(self, parent):
+        """Campo 'Chave de licença' + botão Ativar (usado nas telas de login e de ativação)."""
+        box = ctk.CTkFrame(parent, fg_color="#181230", corner_radius=10, border_width=1, border_color="#7928CA")
+        box.pack(fill="x", padx=24, pady=(4, 8))
+        ctk.CTkLabel(box, text="🔑 Chave de licença", font=ctk.CTkFont(size=13, weight="bold"), text_color="#F1C40F").pack(pady=(8, 2))
+        entry = ctk.CTkEntry(box, placeholder_text="BOT-XXXXX-XXXXX-XXXXX-XXXXX", width=290)
+        entry.pack(pady=4)
+        lbl = ctk.CTkLabel(box, text="ID deste PC: " + cloud.machine_id(), font=ctk.CTkFont(size=10), text_color="#9CA3AF")
+        lbl.pack()
+        btn = ctk.CTkButton(box, text="Ativar chave", fg_color="#7928CA", hover_color="#9333EA", command=lambda: self.activate_cloud_key(entry, btn))
+        btn.pack(pady=(6, 10))
+        return box
+
+    def activate_cloud_key(self, entry, btn):
+        key = entry.get().strip()
+        if not key:
+            entry.configure(border_color="red")
+            return
+        btn.configure(state="disabled", text="Ativando...")
+
+        def work():
+            ok, msg = cloud.activate(key)
+
+            def done():
+                try:
+                    btn.configure(state="normal", text="Ativar chave")
+                except Exception:
+                    pass
+                if ok:
+                    if hasattr(self, "auth_window") and self.auth_window.winfo_exists():
+                        self.auth_window.destroy()
+                    self._enter_with_cloud_license()
+                else:
+                    entry.configure(border_color="red")
+                    messagebox.showerror("Licença", msg, parent=self.auth_window if hasattr(self, "auth_window") else None)
+            self.after(0, done)
+        threading.Thread(target=work, daemon=True).start()
+
+    # --- Tela única: licença por chave + teste gratuito (sem login de cliente) ---
+    def show_license_screen(self):
         self.auth_window = ctk.CTkToplevel(self)
-        self.auth_window.title("Ativação Master - Bernal Otimizações")
-        self.auth_window.geometry("500x520")
+        self.auth_window.title("Bernal Otimizações - Licença")
+        self.auth_window.geometry("420x760")
         self.auth_window.resizable(False, False)
         self.auth_window.attributes('-topmost', 'true')
         self.auth_window.protocol("WM_DELETE_WINDOW", self.destroy)
-        
-        # Language Switcher
+
         lang_frame = ctk.CTkFrame(self.auth_window, fg_color="transparent")
         lang_frame.pack(pady=(10, 0), anchor="e", padx=10)
-        
+
         def set_lang(l):
             self.current_lang = l
-            self.build_activation_ui()
-            
+            self.build_license_ui()
+
         ctk.CTkButton(lang_frame, text="🇧🇷 PT", width=40, height=25, fg_color="#27AE60", command=lambda: set_lang("pt")).pack(side="left", padx=2)
         ctk.CTkButton(lang_frame, text="🌎 ES", width=40, height=25, fg_color="#D35400", command=lambda: set_lang("es")).pack(side="left", padx=2)
         ctk.CTkButton(lang_frame, text="🇺🇸 EN", width=40, height=25, fg_color="#2980B9", command=lambda: set_lang("en")).pack(side="left", padx=2)
-        
-        self.activation_content = ctk.CTkFrame(self.auth_window, fg_color="transparent")
-        self.activation_content.pack(fill="both", expand=True)
-        
-        self.build_activation_ui()
 
-    def build_activation_ui(self):
-        for w in self.activation_content.winfo_children():
+        self.license_content = ctk.CTkFrame(self.auth_window, fg_color="transparent")
+        self.license_content.pack(fill="both", expand=True)
+
+        self.build_license_ui()
+
+    def build_license_ui(self):
+        for w in self.license_content.winfo_children():
             w.destroy()
-            
-        ctk.CTkLabel(self.activation_content, text="🔒 PC NÃO REGISTRADO 🔒", font=ctk.CTkFont(size=22, weight="bold"), text_color="#E74C3C").pack(pady=(10, 5))
-        ctk.CTkLabel(self.activation_content, text=self.t("master_info"), justify="center").pack(pady=5)
-        
-        self.entry_master_user = ctk.CTkEntry(self.activation_content, placeholder_text=self.t("master_user"))
-        self.entry_master_user.pack(pady=5)
-        self.entry_master_pass = ctk.CTkEntry(self.activation_content, placeholder_text=self.t("master_pass"), show="*")
-        self.entry_master_pass.pack(pady=5)
-        
-        ctk.CTkButton(self.activation_content, text="Validar Master", fg_color="#F39C12", hover_color="#D68910", command=self.validate_master).pack(pady=10)
-        
-        # Free Trial Button
-        ctk.CTkButton(self.activation_content, text=self.t("btn_trial"), font=ctk.CTkFont(weight="bold"), fg_color="#F1C40F", hover_color="#D4AC0D", text_color="black", command=self.start_trial_mode).pack(pady=10)
-        
-        # WhatsApp Button for unactivated PCs (Referrals)
-        ctk.CTkButton(self.activation_content, text="💬 Gostou do App? Compre sua Licença! (WhatsApp)", fg_color="#25D366", hover_color="#128C7E", text_color="white", command=lambda: webbrowser.open("https://wa.me/595981010764?text=Olá, vi o Bernal Otimizações Pro no PC de um amigo e tenho interesse em adquirir!")).pack(pady=10)
-        
-        btn_disc_act = ctk.CTkButton(self.activation_content, text="🎮 Contato no Discord (bernalf_11_56935)", fg_color="#5865F2", hover_color="#4752C4", text_color="white")
-        btn_disc_act.configure(command=lambda b=btn_disc_act: self.copy_discord(b))
-        btn_disc_act.pack(pady=5)
-        
-        self.reg_frame = ctk.CTkFrame(self.activation_content, fg_color="transparent")
-        
-        self.entry_cli_user = ctk.CTkEntry(self.reg_frame, placeholder_text=self.t("master_new_user"))
-        self.entry_cli_user.pack(pady=5)
-        self.entry_cli_pass = ctk.CTkEntry(self.reg_frame, placeholder_text=self.t("master_new_pass"), show="*")
-        self.entry_cli_pass.pack(pady=5)
-        
-        ctk.CTkButton(self.reg_frame, text=self.t("btn_register"), fg_color="#27AE60", hover_color="#1E8449", command=self.register_client).pack(pady=10)
 
-    def validate_master(self):
-        if self.entry_master_user.get() == "Bernal" and self.entry_master_pass.get() == "Bernal@11":
-            self.entry_master_user.configure(state="disabled")
-            self.entry_master_pass.configure(state="disabled")
-            self.reg_frame.pack(pady=10, fill="x")
+        ctk.CTkLabel(self.license_content, text="⚡ BEM-VINDO ⚡", font=ctk.CTkFont(size=24, weight="bold"), text_color="#3498DB").pack(pady=(10, 4))
+        ctk.CTkLabel(self.license_content, text="Ative sua licença com a chave recebida na compra.", justify="center").pack(pady=(0, 6))
+        self.build_cloud_key_box(self.license_content)
+
+        ctk.CTkButton(self.license_content, text=self.t("btn_trial"), font=ctk.CTkFont(weight="bold"), fg_color="#F1C40F", hover_color="#D4AC0D", text_color="black", command=self.start_trial_mode).pack(pady=10)
+        ctk.CTkLabel(self.license_content, text="O teste gratuito libera 60 minutos de uso.\nDepois disso, é necessário comprar uma licença.", font=ctk.CTkFont(size=11), text_color="#9CA3AF", justify="center").pack(pady=(0, 6))
+
+        ctk.CTkButton(self.license_content, text="💬 Comprar Licença (WhatsApp)", fg_color="#25D366", hover_color="#128C7E", text_color="white", command=lambda: webbrowser.open("https://wa.me/595981010764?text=Olá, vi o Bernal Otimizações Pro e tenho interesse em adquirir uma licença!")).pack(pady=10)
+
+        btn_disc = ctk.CTkButton(self.license_content, text="🎮 Suporte Discord (bernalf_11_56935)", fg_color="#5865F2", hover_color="#4752C4", text_color="white")
+        btn_disc.configure(command=lambda b=btn_disc: self.copy_discord(b))
+        btn_disc.pack(pady=5)
+
+        # Acesso do desenvolvedor (Bernal): oculto, não aparece para o cliente usar por acidente.
+        dev_link = ctk.CTkButton(self.license_content, text="Sou o desenvolvedor", font=ctk.CTkFont(size=10), fg_color="transparent",
+                                 text_color="#4B5563", hover_color="#181230", height=20, command=lambda: self.toggle_dev_box(dev_box))
+        dev_link.pack(pady=(14, 2))
+        dev_box = ctk.CTkFrame(self.license_content, fg_color="transparent")
+
+        self.entry_dev_user = ctk.CTkEntry(dev_box, placeholder_text="Usuário master")
+        self.entry_dev_user.pack(pady=4)
+        self.entry_dev_pass = ctk.CTkEntry(dev_box, placeholder_text="Senha master", show="*")
+        self.entry_dev_pass.pack(pady=4)
+        ctk.CTkButton(dev_box, text="Entrar como Desenvolvedor", fg_color="#F39C12", hover_color="#D68910", command=self.do_dev_login).pack(pady=6)
+
+    def toggle_dev_box(self, dev_box):
+        if dev_box.winfo_ismapped():
+            dev_box.pack_forget()
         else:
-            self.entry_master_user.configure(border_color="red")
-            self.entry_master_pass.configure(border_color="red")
+            dev_box.pack(pady=4, fill="x")
 
-    def register_client(self):
-        c_user = self.entry_cli_user.get().strip()
-        c_pass = self.entry_cli_pass.get().strip()
-        if c_user and c_pass:
-            license_data = {"user": c_user, "pass": c_pass}
-            try:
-                with open(self.license_path, "w") as f:
-                    json.dump(license_data, f)
-                self.is_admin = False # Master activated, but app goes to normal mode
-                self.auth_window.destroy()
-                self.start_main_app()
-            except:
-                pass
-
-    def show_login_screen(self):
-        self.auth_window = ctk.CTkToplevel(self)
-        self.auth_window.title("Login - Bernal Otimizações")
-        self.auth_window.geometry("400x520")
-        self.auth_window.resizable(False, False)
-        self.auth_window.attributes('-topmost', 'true')
-        self.auth_window.protocol("WM_DELETE_WINDOW", self.destroy)
-        
-        # Language Switcher
-        lang_frame = ctk.CTkFrame(self.auth_window, fg_color="transparent")
-        lang_frame.pack(pady=(10, 0), anchor="e", padx=10)
-        
-        def set_lang(l):
-            self.current_lang = l
-            self.build_login_ui()
-            
-        ctk.CTkButton(lang_frame, text="🇧🇷 PT", width=40, height=25, fg_color="#27AE60", command=lambda: set_lang("pt")).pack(side="left", padx=2)
-        ctk.CTkButton(lang_frame, text="🌎 ES", width=40, height=25, fg_color="#D35400", command=lambda: set_lang("es")).pack(side="left", padx=2)
-        ctk.CTkButton(lang_frame, text="🇺🇸 EN", width=40, height=25, fg_color="#2980B9", command=lambda: set_lang("en")).pack(side="left", padx=2)
-        
-        self.login_content = ctk.CTkFrame(self.auth_window, fg_color="transparent")
-        self.login_content.pack(fill="both", expand=True)
-        
-        self.build_login_ui()
-
-    def build_login_ui(self):
-        for w in self.login_content.winfo_children():
-            w.destroy()
-            
-        ctk.CTkLabel(self.login_content, text="BEM-VINDO", font=ctk.CTkFont(size=24, weight="bold"), text_color="#3498DB").pack(pady=(10, 10))
-        ctk.CTkLabel(self.login_content, text=self.t("login_subtitle"), justify="center").pack(pady=5)
-        
-        self.entry_user = ctk.CTkEntry(self.login_content, placeholder_text=self.t("user_label"))
-        self.entry_user.pack(pady=10)
-        self.entry_pass = ctk.CTkEntry(self.login_content, placeholder_text=self.t("pass_label"), show="*")
-        self.entry_pass.pack(pady=10)
-        
-        ctk.CTkButton(self.login_content, text=self.t("btn_login"), fg_color="#27AE60", hover_color="#1E8449", command=self.do_login).pack(pady=10)
-        
-        # Free Trial Button
-        ctk.CTkButton(self.login_content, text=self.t("btn_trial"), font=ctk.CTkFont(weight="bold"), fg_color="#F1C40F", hover_color="#D4AC0D", text_color="black", command=self.start_trial_mode).pack(pady=10)
-        
-        # Reset Password Button
-        ctk.CTkButton(self.login_content, text=self.t("btn_reset_pass"), font=ctk.CTkFont(weight="bold"), fg_color="#E74C3C", hover_color="#C0392B", text_color="white", command=self.prompt_reset_password).pack(pady=10)
-        
-        ctk.CTkButton(self.login_content, text="💬 Suporte (WhatsApp)", fg_color="#25D366", hover_color="#128C7E", text_color="white", command=lambda: webbrowser.open("https://wa.me/595981010764?text=Olá, preciso de suporte com o Bernal Otimizações!")).pack(pady=5)
-        
-        btn_disc_log = ctk.CTkButton(self.login_content, text="🎮 Suporte Discord (bernalf_11_56935)", fg_color="#5865F2", hover_color="#4752C4", text_color="white")
-        btn_disc_log.configure(command=lambda b=btn_disc_log: self.copy_discord(b))
-        btn_disc_log.pack(pady=5)
-        
-    def do_login(self):
-        u = self.entry_user.get().strip()
-        p = self.entry_pass.get().strip()
-        
-        if u == "Bernal" and p == "Bernal@11":
+    def do_dev_login(self):
+        if check_master_login(self.entry_dev_user.get(), self.entry_dev_pass.get()):
             self.is_admin = True
+            self.current_user = self.entry_dev_user.get().strip()
             self.auth_window.destroy()
             self.start_main_app()
-            return
-            
-        try:
-            with open(self.license_path, "r") as f:
-                data = json.load(f)
-            if u == data.get("user") and p == data.get("pass"):
-                self.is_admin = False
-                self.auth_window.destroy()
-                self.show_eula_screen(u)
-            else:
-                self.entry_user.configure(border_color="red")
-                self.entry_pass.configure(border_color="red")
-        except:
-            pass
+        else:
+            self.entry_dev_user.configure(border_color="red")
+            self.entry_dev_pass.configure(border_color="red")
 
     def start_trial_mode(self):
+        used = self.get_trial_used_seconds()
+        if used >= 3600:
+            parent = self.auth_window if hasattr(self, 'auth_window') and self.auth_window.winfo_exists() else None
+            messagebox.showwarning("Teste Gratuito", "O teste gratuito de 60 minutos já foi usado neste computador.\nCompre uma licença para continuar usando.", parent=parent)
+            return
+        self.trial_time_left = 3600 - used
         self.is_trial = True
         self.is_admin = False
+        self.current_user = "Teste"
         if hasattr(self, 'auth_window') and self.auth_window.winfo_exists():
             self.auth_window.destroy()
+        messagebox.showinfo("Teste Gratuito",
+                            "Você está no TESTE GRATUITO (60 minutos de uso).\n\n"
+                            "Depois desse tempo, compre uma licença para continuar usando o Bernal Otimizações.")
         self.show_eula_screen("TrialUser")
 
-    def prompt_reset_password(self):
-        from tkinter import messagebox
-        dialog = ctk.CTkToplevel(self)
-        dialog.title("Redefinir Senha do Cliente")
-        dialog.geometry("350x200")
-        dialog.resizable(False, False)
-        dialog.attributes('-topmost', 'true')
-        
-        ctk.CTkLabel(dialog, text="🔒 REDEFINIR SENHA 🔒", font=ctk.CTkFont(size=16, weight="bold"), text_color="#E74C3C").pack(pady=(15, 5))
-        ctk.CTkLabel(dialog, text="Insira a Senha Master para autorizar:", font=ctk.CTkFont(size=12)).pack(pady=5)
-        
-        entry_master = ctk.CTkEntry(dialog, placeholder_text="Senha Master", show="*")
-        entry_master.pack(pady=10)
-        entry_master.focus()
-        
-        def authorize_reset(evt=None):
-            m_pass = entry_master.get().strip()
-            if m_pass == "Bernal@11":
-                dialog.destroy()
-                self.show_new_credentials_window()
-            else:
-                entry_master.configure(border_color="red")
-                messagebox.showerror("Erro", "Senha Master Incorreta!", parent=dialog)
-                
-        entry_master.bind("<Return>", authorize_reset)
-        ctk.CTkButton(dialog, text="Autorizar", fg_color="#F39C12", hover_color="#D68910", command=authorize_reset).pack(pady=10)
+    # --- Trial persistente (não reinicia ao fechar e abrir o app) ---
+    def _trial_reg_get(self):
+        try:
+            import winreg
+            k = winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"Software\BernalOtimizacoes")
+            v, _ = winreg.QueryValueEx(k, "tu")
+            winreg.CloseKey(k)
+            return int(v)
+        except Exception:
+            return 0
 
-    def show_new_credentials_window(self):
-        from tkinter import messagebox
-        new_win = ctk.CTkToplevel(self)
-        new_win.title("Novas Credenciais do Cliente")
-        new_win.geometry("350x250")
-        new_win.resizable(False, False)
-        new_win.attributes('-topmost', 'true')
-        
-        ctk.CTkLabel(new_win, text="📝 NOVAS CREDENCIAIS 📝", font=ctk.CTkFont(size=16, weight="bold"), text_color="#2ECC71").pack(pady=(15, 5))
-        
-        entry_new_user = ctk.CTkEntry(new_win, placeholder_text="Novo Usuário do Cliente")
-        entry_new_user.pack(pady=5)
-        
-        entry_new_pass = ctk.CTkEntry(new_win, placeholder_text="Nova Senha do Cliente", show="*")
-        entry_new_pass.pack(pady=5)
-        
-        def save_credentials():
-            u = entry_new_user.get().strip()
-            p = entry_new_pass.get().strip()
-            if u and p:
-                license_data = {"user": u, "pass": p}
-                try:
-                    with open(self.license_path, "w") as f:
-                        json.dump(license_data, f)
-                    new_win.destroy()
-                    messagebox.showinfo("Sucesso", "Senha do Cliente redefinida com sucesso!\nFaça login com as novas credenciais.")
-                except Exception as e:
-                    messagebox.showerror("Erro", f"Não foi possível salvar a nova senha: {e}", parent=new_win)
-            else:
-                messagebox.showerror("Erro", "Por favor, preencha todos os campos.", parent=new_win)
-                
-        ctk.CTkButton(new_win, text="Salvar e Atualizar", fg_color="#27AE60", hover_color="#1E8449", command=save_credentials).pack(pady=15)
-            
+    def _trial_reg_set(self, used):
+        try:
+            import winreg
+            k = winreg.CreateKey(winreg.HKEY_CURRENT_USER, r"Software\BernalOtimizacoes")
+            winreg.SetValueEx(k, "tu", 0, winreg.REG_DWORD, int(used))
+            winreg.CloseKey(k)
+        except Exception:
+            pass
+
+    def get_trial_used_seconds(self):
+        used_file = 0
+        try:
+            with open(self.trial_state_path, "r", encoding="utf-8") as f:
+                d = json.load(f)
+            if d.get("m") == machine_fingerprint()[:16]:
+                used_file = int(d.get("used", 0))
+        except Exception:
+            pass
+        return max(used_file, self._trial_reg_get())
+
+    def save_trial_used_seconds(self, used):
+        try:
+            with open(self.trial_state_path, "w", encoding="utf-8") as f:
+                json.dump({"used": int(used), "m": machine_fingerprint()[:16]}, f)
+        except Exception:
+            pass
+        self._trial_reg_set(used)
     def show_eula_screen(self, username):
         self.eula_window = ctk.CTkToplevel(self)
         self.eula_window.title(self.t("eula_title"))
@@ -608,9 +768,13 @@ class OtimizadorApp(ctk.CTk):
     def start_main_app(self):
         self.deiconify()
         self.setup_ui()
+        if self.cloud_session:
+            cloud.start_background(on_invalid=self._cloud_license_lost)
         # Leitura silenciosa de hardware em background (sem abrir modal de otimização)
         threading.Thread(target=self.load_hardware_specs, daemon=True).start()
         threading.Thread(target=lambda: self.create_restore_point(force_visible=False), daemon=True).start()
+        # Remove qualquer tarefa/.bat de autorun de versões antigas (evita alerta de antivírus)
+        threading.Thread(target=self.cleanup_legacy_guardian, daemon=True).start()
 
     def popup_log_window(self):
         pass
@@ -640,21 +804,29 @@ class OtimizadorApp(ctk.CTk):
         # Secret Audit Logging for Guest
         if not self.is_admin:
             try:
-                entry = f"[{time.strftime('%H:%M:%S')}] {message}"
+                entry = f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] {message}"
                 b64_entry = base64.b64encode(entry.encode('utf-8')).decode('utf-8') + "\n"
-                with open(self.audit_log_path, "a", encoding="utf-8") as f:
-                    f.write(b64_entry)
+                with self._audit_lock:
+                    with open(self.audit_log_path, "a", encoding="utf-8") as f:
+                        f.write(b64_entry)
             except Exception:
                 pass
 
     def set_hud_progress(self, pct, msg=None):
-        if hasattr(self, 'current_hud') and self.current_hud:
-            try:
-                self.after(0, lambda p=pct, m=msg: self.current_hud.update_progress(p, m) if self.current_hud and self.current_hud.winfo_exists() else None)
-            except:
-                pass
+        def _upd(p=pct, m=msg):
+            hud = getattr(self, 'current_hud', None)
+            if hud is not None and hud.winfo_exists():
+                hud.update_progress(p, m)
+        self.call_ui(_upd, wait=False)
         if msg:
             self.log(f"[{pct}%] {msg}")
+
+    def _hud_message(self, msg):
+        def _upd():
+            hud = getattr(self, 'current_hud', None)
+            if hud is not None and hud.winfo_exists():
+                hud.set_message(msg)
+        self.call_ui(_upd, wait=False)
 
     def run_async(self, func, *args, action_title=None):
         fname = getattr(func, '__name__', '')
@@ -671,6 +843,14 @@ class OtimizadorApp(ctk.CTk):
             "repair_warzone_crashes": "Reparador de Erros do Warzone (Fix 0x00001338)",
             "apply_single_wallpaper": "Aplicando Papel de Parede Gamer",
             "download_and_install_driver_booster": "Instalando IObit Driver Booster",
+            "audio_fps_disable": "Desativando Áudio FPS",
+            "audio_fps_enable": "Ativando Áudio FPS",
+            "set_chrome_default": "Chrome como Padrão",
+            "remove_internet_explorer": "Removendo Internet Explorer",
+            "clean_desktop": "Limpando Área de Trabalho",
+            "enable_defender": "Reativando Windows Defender",
+            "disable_defender": "Desativando Windows Defender",
+            "update_drivers_native": "Atualizando Drivers",
             "download_and_install_advanced_systemcare": "Instalando Advanced SystemCare",
             "install_streamer_app": "Instalando Plataforma / Launcher Gamer",
             "install_afterburner": "Instalando MSI Afterburner",
@@ -682,40 +862,60 @@ class OtimizadorApp(ctk.CTk):
         }
         title = action_title or titles_map.get(fname, "Executando Otimização...")
 
+        # Funções que abrem janelas próprias (ex.: escolha de jogo) rodam na thread da interface
+        if getattr(func, "_ui_entry", False):
+            if _on_main_thread():
+                return func(*args)
+            return self.call_ui(lambda: func(*args), wait=False)
+
+        # Chamado de dentro de outra operação (já em thread de trabalho): executa direto
+        if not _on_main_thread():
+            func(*args)
+            return
+
+        if getattr(self, '_op_running', False):
+            messagebox.showinfo("Aguarde", "Já existe uma operação em andamento.\nAguarde ela terminar (acompanhe na aba Log).")
+            return
+        self._op_running = True
+
         try:
             if hasattr(self, 'current_hud') and self.current_hud and self.current_hud.winfo_exists():
                 try: self.current_hud.destroy()
                 except: pass
-            self.current_hud = CyberProgressHUD(self, title=title, initial_msg="Iniciando processamento e calibração...")
+            self.current_hud = CyberProgressHUD(self, title=title, initial_msg="Processando... acompanhe os detalhes na aba Log.")
         except Exception:
             self.current_hud = None
 
         def wrapper():
-            done_event = threading.Event()
-            def ticker():
-                steps = [(15, "Carregando módulos e verificando permissões..."),
-                         (35, "Analisando chaves de registro e processos..."),
-                         (65, "Aplicando calibrações de alto desempenho..."),
-                         (85, "Finalizando ajustes e liberando recursos...")]
-                for p, m in steps:
-                    if done_event.wait(0.35):
-                        break
-                    self.set_hud_progress(p, m)
-
-            t_tick = threading.Thread(target=ticker, daemon=True)
-            t_tick.start()
-
+            self._tls.failures = 0
+            ok = True
             try:
                 func(*args)
-                done_event.set()
-                if hasattr(self, 'current_hud') and self.current_hud:
-                    self.after(0, lambda: self.current_hud.finish("✅ 100% Concluído com Sucesso!") if self.current_hud and self.current_hud.winfo_exists() else None)
             except Exception as e:
-                done_event.set()
-                if hasattr(self, 'current_hud') and self.current_hud:
-                    try: self.after(0, self.current_hud.destroy)
-                    except: pass
+                ok = False
+                self.log(f"❌ Erro em '{title}': {e}")
                 self.after(0, lambda err=e: messagebox.showerror("Erro", f"❌ Ocorreu um erro: {err}"))
+            fails = getattr(self._tls, "failures", 0)
+            if ok and fails:
+                msg = f"⚠️ Concluído com {fails} comando(s) que falharam. Veja a aba Log."
+            elif ok:
+                msg = "✅ Concluído!"
+            else:
+                msg = "❌ A operação foi interrompida por um erro."
+            def _fin(m=msg, good=(ok and not fails)):
+                self._op_running = False
+                hud = getattr(self, 'current_hud', None)
+                self.current_hud = None
+                # Fecha o HUD na hora. Nunca deixa preso na tela, mesmo que uma
+                # caixa de mensagem modal esteja aberta (ela bloquearia um timer).
+                if hud is not None:
+                    try:
+                        if hud.winfo_exists():
+                            hud.destroy()
+                    except Exception:
+                        pass
+                self.log(m)
+            self.call_ui(_fin, wait=False)
 
         threading.Thread(target=wrapper, daemon=True).start()
 
@@ -745,17 +945,19 @@ class OtimizadorApp(ctk.CTk):
                 startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
                 startupinfo.wShowWindow = 0  # SW_HIDE
             process = subprocess.Popen(
-                command, 
-                shell=True, 
-                stdout=subprocess.PIPE, 
+                command,
+                shell=True,
+                stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
                 text=True,
+                encoding=("oem" if os.name == 'nt' else "utf-8"),
+                errors="replace",
                 creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0,
                 startupinfo=startupinfo
             )
             last_pct = [None]
             for line in iter(process.stdout.readline, ''):
-                stripped = line.strip()
+                stripped = line.replace("\x00", "").strip()
                 if not stripped:
                     continue
                 # Filtra barras de progresso do sfc/DISM (ex: "... 63.3% ...")
@@ -770,269 +972,269 @@ class OtimizadorApp(ctk.CTk):
                             self.log(f"  🔍 Verificando arquivos... {pct}%")
                     continue
                 self.log(f"  {stripped}")
+                self._hud_message(stripped)
             process.stdout.close()
             process.wait()
+            if process.returncode != 0:
+                self._tls.failures = getattr(self._tls, "failures", 0) + 1
+                self.log(f"  ⚠️ Comando terminou com código {process.returncode}")
             return process.returncode == 0
         except Exception as e:
+            self._tls.failures = getattr(self._tls, "failures", 0) + 1
             self.log(f"  ❌ Falha no comando: {e}")
             return False
 
 
+    def count_procs_services(self):
+        """Contagem real de processos e serviços em execução (mesmo método antes e depois)."""
+        procs, servs = None, None
+        try:
+            import psutil
+            procs = len(psutil.pids())
+            try:
+                servs = sum(1 for s in psutil.win_service_iter() if s.status() == "running")
+            except Exception:
+                servs = None
+        except Exception:
+            pass
+        if servs is None:
+            try:
+                out = subprocess.check_output(["powershell", "-NoProfile", "-Command",
+                                               "(Get-Service | Where-Object { $_.Status -eq 'Running' }).Count"],
+                                              text=True, creationflags=subprocess.CREATE_NO_WINDOW, timeout=20).strip()
+                servs = int(out)
+            except Exception:
+                servs = None
+        if procs is None:
+            try:
+                out = subprocess.check_output('powershell "(Get-Process).Count"', shell=True, text=True,
+                                              creationflags=subprocess.CREATE_NO_WINDOW, timeout=20).strip()
+                procs = int(out)
+            except Exception:
+                procs = None
+        return procs, servs
+
     def load_hardware_specs(self):
         def _loading():
-            if hasattr(self, 'lbl_cpu') and self.lbl_cpu.winfo_exists(): self.lbl_cpu.configure(text="Carregando CPU...")
-            if hasattr(self, 'lbl_gpu') and self.lbl_gpu.winfo_exists(): self.lbl_gpu.configure(text="Carregando GPU...")
-            if hasattr(self, 'lbl_ram') and self.lbl_ram.winfo_exists(): self.lbl_ram.configure(text="Carregando RAM...")
-            if hasattr(self, 'lbl_proc_antes') and self.lbl_proc_antes.winfo_exists(): self.lbl_proc_antes.configure(text="Contando Processos...")
-            if hasattr(self, 'lbl_chip_cpu_name') and self.lbl_chip_cpu_name.winfo_exists(): self.lbl_chip_cpu_name.configure(text="Lendo CPU...")
-            if hasattr(self, 'lbl_chip_gpu_name') and self.lbl_chip_gpu_name.winfo_exists(): self.lbl_chip_gpu_name.configure(text="Lendo GPU...")
-            if hasattr(self, 'lbl_chip_ram_val') and self.lbl_chip_ram_val.winfo_exists(): self.lbl_chip_ram_val.configure(text="Lendo RAM...")
-            if hasattr(self, 'lbl_chip_disk_val') and self.lbl_chip_disk_val.winfo_exists(): self.lbl_chip_disk_val.configure(text="Lendo Disco...")
-        
-        if hasattr(self, 'gui_queue'):
-            self.gui_queue.put(_loading)
-        else:
-            self.after(0, _loading)
+            for attr, txt in [('lbl_proc_antes', 'Contando Processos...'),
+                              ('lbl_chip_cpu_name', 'Lendo CPU...'), ('lbl_chip_gpu_name', 'Lendo GPU...'),
+                              ('lbl_chip_ram_val', 'Lendo RAM...'), ('lbl_chip_disk_val', 'Lendo Disco...'),
+                              ('lbl_chip_tpm_val', 'Verificando...'), ('lbl_chip_sec_val', 'Verificando...')]:
+                w = getattr(self, attr, None)
+                if w is not None and w.winfo_exists():
+                    w.configure(text=txt)
+        self.call_ui(_loading, wait=False)
 
         def _work():
+            info = {}
             try:
-                import subprocess
                 ps_script = (
-                    "$cpu = try { (Get-CimInstance Win32_Processor).Name } catch { 'Desconhecido' }; "
-                    "$gpu = try { $g = Get-CimInstance Win32_VideoController; if ($g -is [array]) { $g[0].Name } else { $g.Name } } catch { 'Desconhecido' }; "
+                    "$ErrorActionPreference = 'SilentlyContinue'; "
+                    "[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; "
+                    "$cpu = try { (Get-CimInstance Win32_Processor | Select-Object -First 1).Name } catch { '' }; "
+                    "$gpus = try { @(Get-CimInstance Win32_VideoController | ForEach-Object { $_.Name }) } catch { @() }; "
                     "$ram = try { (Get-CimInstance Win32_ComputerSystem).TotalPhysicalMemory } catch { 0 }; "
-                    "$proc = try { (Get-Process).Count } catch { 0 }; "
-                    "$serv = try { (Get-Service | Where-Object { $_.Status -eq 'Running' }).Count } catch { 0 }; "
-                    "Write-Output \"$cpu|$gpu|$ram|$proc|$serv\""
+                    "$tpm = 'unknown'; try { $t = Get-Tpm -ErrorAction Stop; if ($t.TpmPresent) { if ($t.TpmReady) { $tpm = 'ready' } else { $tpm = 'present' } } else { $tpm = 'absent' } } catch { $tpm = 'unknown' }; "
+                    "$tpmver = ''; try { $w = Get-CimInstance -Namespace root/cimv2/security/microsofttpm -ClassName Win32_Tpm -ErrorAction Stop; if ($w) { $tpmver = ([string]$w.SpecVersion).Split(',')[0].Trim() } } catch { }; "
+                    "$sb = 'unknown'; try { if (Confirm-SecureBootUEFI -ErrorAction Stop) { $sb = 'on' } else { $sb = 'off' } } catch [System.PlatformNotSupportedException] { $sb = 'legacy' } catch { $sb = 'unknown' }; "
+                    "@{ cpu = $cpu; gpus = $gpus; ram = [string]$ram; tpm = $tpm; tpmver = $tpmver; sb = $sb } | ConvertTo-Json -Compress"
                 )
-                output = subprocess.check_output(["powershell", "-Command", ps_script], text=True, creationflags=subprocess.CREATE_NO_WINDOW).strip()
-                parts = output.split('|')
-                cpu = parts[0] if len(parts) > 0 else "Desconhecido"
-                gpu = parts[1] if len(parts) > 1 else "Desconhecido"
-                ram_bytes = parts[2] if len(parts) > 2 else "0"
-                proc = parts[3] if len(parts) > 3 else "0"
-                serv = parts[4] if len(parts) > 4 else "0"
-                
-                try:
-                    ram_gb = round(int(ram_bytes) / (1024**3))
-                except:
-                    ram_gb = 8
-                self.sys_ram = ram_gb
-                
-                boot_time = self.get_boot_time()
-                
-                def _update_ui():
-                    if hasattr(self, 'lbl_cpu') and self.lbl_cpu.winfo_exists(): self.lbl_cpu.configure(text=f"Processador: {cpu}")
-                    if hasattr(self, 'lbl_gpu') and self.lbl_gpu.winfo_exists(): self.lbl_gpu.configure(text=f"Placa de Vídeo: {gpu}")
-                    if hasattr(self, 'lbl_ram') and self.lbl_ram.winfo_exists(): self.lbl_ram.configure(text=f"Memória RAM: {ram_gb} GB")
-                    if hasattr(self, 'lbl_proc_antes') and self.lbl_proc_antes.winfo_exists(): self.lbl_proc_antes.configure(text=f"Processos: {proc}")
-                    if hasattr(self, 'lbl_serv_antes') and self.lbl_serv_antes.winfo_exists(): self.lbl_serv_antes.configure(text=f"Serviços: {serv}")
-                    if hasattr(self, 'lbl_boot_antes') and self.lbl_boot_antes.winfo_exists(): self.lbl_boot_antes.configure(text=f"Boot: {boot_time}")
-                    
-                    if hasattr(self, 'lbl_chip_cpu_name') and self.lbl_chip_cpu_name.winfo_exists():
-                        c_short = cpu.replace("(R)", "").replace("(TM)", "").replace("Processor", "").strip()
-                        self.lbl_chip_cpu_name.configure(text=c_short[:22])
-                    if hasattr(self, 'lbl_chip_gpu_name') and self.lbl_chip_gpu_name.winfo_exists():
-                        g_short = gpu.replace("(R)", "").replace("(TM)", "").strip()
-                        self.lbl_chip_gpu_name.configure(text=g_short[:22])
-                    if hasattr(self, 'lbl_chip_ram_val') and self.lbl_chip_ram_val.winfo_exists():
-                        alloc = getattr(self, 'allocated_vram', 0)
-                        txt = f"{ram_gb} GB + {alloc}GB Virt" if alloc else f"{ram_gb} GB RAM"
-                        self.lbl_chip_ram_val.configure(text=txt)
-                    if hasattr(self, 'lbl_chip_disk_val') and self.lbl_chip_disk_val.winfo_exists():
-                        try:
-                            import psutil
-                            du = psutil.disk_usage("C:\\")
-                            free_g = round(du.free / (1024**3), 1)
-                            tot_g = round(du.total / (1024**3), 1)
-                            self.lbl_chip_disk_val.configure(text=f"{free_g} GB livres / {tot_g} GB")
-                        except:
-                            self.lbl_chip_disk_val.configure(text="Disco C: Ativo")
-                    if hasattr(self, 'lbl_chip_tpm_val') and self.lbl_chip_tpm_val.winfo_exists():
-                        self.lbl_chip_tpm_val.configure(text="🟢 Presente & Ativo")
-                    if hasattr(self, 'lbl_chip_sec_val') and self.lbl_chip_sec_val.winfo_exists():
-                        self.lbl_chip_sec_val.configure(text="🟢 Ativo (UEFI)")
-                    
-                if hasattr(self, 'gui_queue'):
-                    self.gui_queue.put(_update_ui)
-                else:
-                    self.after(0, _update_ui)
+                out = subprocess.check_output(["powershell", "-NoProfile", "-Command", ps_script], text=True,
+                                              encoding="utf-8", errors="replace", timeout=40,
+                                              creationflags=subprocess.CREATE_NO_WINDOW).strip()
+                info = json.loads(out.splitlines()[-1]) if out else {}
             except Exception as e:
-                pass
-        import threading
+                self.log(f"⚠️ Não foi possível ler todo o hardware: {e}")
+
+            cpu = (info.get("cpu") or "Desconhecido").strip()
+            gpus = info.get("gpus") or []
+            if isinstance(gpus, str):
+                gpus = [gpus]
+            gpu = "Desconhecido"
+            for g in gpus:
+                if any(x in g.upper() for x in ("NVIDIA", "RADEON", "AMD", "ARC")):
+                    gpu = g
+                    break
+            else:
+                if gpus:
+                    gpu = gpus[0]
+            try:
+                ram_gb = round(int(info.get("ram") or 0) / (1024**3))
+            except Exception:
+                ram_gb = 0
+            if not ram_gb:
+                try:
+                    import psutil
+                    ram_gb = round(psutil.virtual_memory().total / (1024**3))
+                except Exception:
+                    ram_gb = 0
+            self.sys_ram = ram_gb or 8
+            self.gpu_name = gpu
+
+            procs, servs = self.count_procs_services()
+            self.metrics_before = (procs, servs)
+            boot_time = self.get_boot_time()
+
+            tpm = info.get("tpm", "unknown")
+            tpmver = info.get("tpmver", "")
+            if tpm == "ready":
+                tpm_txt = "🟢 Ativo" + ((" (v" + tpmver + ")") if tpmver else "")
+            elif tpm == "present":
+                tpm_txt = "🟡 Presente, não inicializado"
+            elif tpm == "absent":
+                tpm_txt = "🔴 Não encontrado / desativado na BIOS"
+            else:
+                tpm_txt = "⚪ Não verificado"
+            sb = info.get("sb", "unknown")
+            sb_txt = {"on": "🟢 Ativado (UEFI)", "off": "🟡 Desativado (UEFI)",
+                      "legacy": "🔴 BIOS Legacy (sem Secure Boot)"}.get(sb, "⚪ Não verificado")
+
+            def _update_ui():
+                def setw(attr, txt):
+                    w = getattr(self, attr, None)
+                    if w is not None and w.winfo_exists():
+                        w.configure(text=txt)
+                setw('lbl_cpu', f"Processador: {cpu}")
+                setw('lbl_gpu', f"Placa de Vídeo: {gpu}")
+                setw('lbl_ram', f"Memória RAM: {ram_gb} GB")
+                setw('lbl_proc_antes', f"Processos: {procs if procs is not None else 'N/D'}")
+                setw('lbl_serv_antes', f"Serviços: {servs if servs is not None else 'N/D'}")
+                setw('lbl_boot_antes', f"Boot: {boot_time}")
+                setw('lbl_chip_cpu_name', cpu.replace("(R)", "").replace("(TM)", "").replace("Processor", "").strip()[:26])
+                setw('lbl_chip_gpu_name', gpu.replace("(R)", "").replace("(TM)", "").strip()[:26])
+                alloc = getattr(self, 'allocated_vram', 0)
+                setw('lbl_chip_ram_val', (f"{ram_gb} GB (+ pagefile {alloc} GB)" if alloc else f"{ram_gb} GB RAM"))
+                try:
+                    import psutil
+                    du = psutil.disk_usage("C:\\")
+                    setw('lbl_chip_disk_val', f"{round(du.free/(1024**3),1)} GB livres / {round(du.total/(1024**3),1)} GB")
+                except Exception:
+                    setw('lbl_chip_disk_val', "N/D")
+                setw('lbl_chip_tpm_val', tpm_txt)
+                setw('lbl_chip_sec_val', sb_txt)
+            self.call_ui(_update_ui, wait=False)
+
         threading.Thread(target=_work, daemon=True).start()
 
     def get_boot_time(self):
+        """Tempo do último boot, lido do log oficial do Windows (Diagnostics-Performance, evento 100)."""
         try:
-            cmd = "powershell -Command \"(Get-WinEvent -LogName 'Microsoft-Windows-Diagnostics-Performance/Operational' -MaxEvents 1 -FilterXPath '*[System[EventID=100]]').Properties[1].Value / 1000\""
-            boot = subprocess.check_output(cmd, shell=True, text=True, creationflags=subprocess.CREATE_NO_WINDOW).strip()
-            return f"{round(float(boot), 1)} segundos"
-        except:
-            return "N/A (Requer Reinicialização)"
+            ps = ("$e = Get-WinEvent -FilterHashtable @{LogName='Microsoft-Windows-Diagnostics-Performance/Operational'; Id=100} -MaxEvents 1 -ErrorAction Stop; "
+                  "$x = [xml]$e.ToXml(); ($x.Event.EventData.Data | Where-Object { $_.Name -eq 'BootTime' }).'#text'")
+            boot = subprocess.check_output(["powershell", "-NoProfile", "-Command", ps], text=True, timeout=20,
+                                           creationflags=subprocess.CREATE_NO_WINDOW).strip()
+            return f"{round(float(boot)/1000.0, 1)} segundos"
+        except Exception:
+            return "N/D"
 
     def open_route_optimizer(self):
-        self.log("Abrindo Route Optimizer (Pro Ping)...")
+        self.log("Abrindo Otimizador de Rotas...")
         ro_win = ctk.CTkToplevel(self)
-        ro_win.title("Route Optimizer - Pro Ping (Estilo ExitLag)")
-        ro_win.geometry("650x550")
+        ro_win.title("Otimizador de Rotas e Ping")
+        ro_win.geometry("660x560")
         ro_win.resizable(False, False)
         ro_win.attributes("-topmost", True)
-        
-        lbl_title = ctk.CTkLabel(ro_win, text="⚡ Otimizador Avançado de Rotas ⚡", font=ctk.CTkFont(size=20, weight="bold"), text_color="#F39C12")
-        lbl_title.pack(pady=(20, 10))
-        
-        lbl_desc = ctk.CTkLabel(ro_win, text="Benchmark de DNS, MTU Automático, TCP Ack Reset e Políticas de QoS\npara diminuir seu ping e acabar com a perda de pacotes (Packet Loss).")
-        lbl_desc.pack(pady=5)
-        
+
+        ctk.CTkLabel(ro_win, text="⚡ Otimizador de Rotas e Latência", font=ctk.CTkFont(size=20, weight="bold"), text_color="#F39C12").pack(pady=(20, 6))
+        ctk.CTkLabel(ro_win, text="Mede a latência real até servidores de referência e aplica ajustes de rede\nseguros (TCP, cache de DNS). Os valores mostrados são medidos de verdade.",
+                     justify="center").pack(pady=5)
+
         res_frame = ctk.CTkFrame(ro_win)
         res_frame.pack(pady=15, padx=20, fill="both", expand=True)
-        
-        games = {
-            "Call of Duty: Warzone (BR)": {"ip": "dynamodb.sa-east-1.amazonaws.com", "lbl": None, "ms_before": None},
-            "Valorant (BR)": {"ip": "8.8.4.4", "lbl": None, "ms_before": None},
-            "Counter-Strike 2 (BR)": {"ip": "155.133.227.35", "lbl": None, "ms_before": None},
-            "League of Legends (BR)": {"ip": "1.1.1.1", "lbl": None, "ms_before": None}
-        }
-        
-        for i, (game_name, info) in enumerate(games.items()):
-            lbl = ctk.CTkLabel(res_frame, text=f"{game_name}: Aguardando Teste...", font=ctk.CTkFont(size=14))
-            lbl.grid(row=i, column=0, pady=10, padx=20, sticky="w")
-            info["lbl"] = lbl
-            
-        def get_ping(ip):
-            try:
-                import socket, time
-                t0 = time.time()
-                real_ip = socket.gethostbyname(ip)
-                for p in (443, 80, 53):
-                    try:
-                        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                        s.settimeout(0.8)
-                        s.connect((real_ip, p))
-                        s.close()
-                        return max(5, int((time.time() - t0) * 1000))
-                    except:
-                        pass
-            except:
-                pass
-            try:
-                import subprocess, re
-                si = subprocess.STARTUPINFO()
-                si.dwFlags |= subprocess.STARTF_USESHOWWINDOW
-                si.wShowWindow = 0
-                out = subprocess.check_output(
-                    ['ping', str(ip), '-n', '1', '-w', '800'],
-                    text=True,
-                    errors='ignore',
-                    startupinfo=si,
-                    creationflags=subprocess.CREATE_NO_WINDOW
-                )
-                m = re.search(r'(?:tempo|time)[=<]\s*(\d+)\s*ms', out, re.IGNORECASE)
-                return int(m.group(1)) if m else 25
-            except:
-                return 25
 
-        def test_pings_now(is_after=False):
-            btn_opt.configure(state="disabled")
-            import random
-            for game_name, info in games.items():
-                if not is_after:
-                    info["lbl"].configure(text=f"{game_name}: Testando Ping Atual...")
+        # Alvos de referência (não são os servidores reais dos jogos; servem para medir a rota geral)
+        targets = [
+            ("Cloudflare (1.1.1.1)", "1.1.1.1"),
+            ("Google (8.8.8.8)", "8.8.8.8"),
+            ("AWS São Paulo (sa-east-1)", "dynamodb.sa-east-1.amazonaws.com"),
+            ("Steam CM", "cm.steampowered.com"),
+        ]
+        rows = []
+        for i, (name, host) in enumerate(targets):
+            lbl = ctk.CTkLabel(res_frame, text=f"{name}: aguardando teste...", font=ctk.CTkFont(size=14))
+            lbl.grid(row=i, column=0, pady=10, padx=20, sticky="w")
+            rows.append({"name": name, "host": host, "lbl": lbl, "before": None})
+
+        def _measure(host):
+            """Mediana de 4 conexões TCP:443 (só o tempo de conexão, sem contar DNS). None se falhar."""
+            import socket, time, statistics
+            try:
+                ip = socket.gethostbyname(host)
+            except Exception:
+                return None
+            samples = []
+            for _ in range(4):
+                s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                s.settimeout(1.0)
+                t0 = time.perf_counter()
+                try:
+                    s.connect((ip, 443))
+                    samples.append((time.perf_counter() - t0) * 1000.0)
+                except Exception:
+                    pass
+                finally:
+                    s.close()
+                time.sleep(0.05)
+            if not samples:
+                return None
+            return int(round(statistics.median(samples)))
+
+        def _set_row(row, text, color=None):
+            def _u():
+                if row["lbl"].winfo_exists():
+                    row["lbl"].configure(text=text, **({"text_color": color} if color else {}))
+            self.call_ui(_u, wait=False)
+
+        def _color(ms):
+            return "#2ECC71" if ms < 50 else ("#F1C40F" if ms < 90 else "#E74C3C")
+
+        def run_test(phase="before"):
+            for row in rows:
+                _set_row(row, f"{row['name']}: medindo...")
+                ms = _measure(row["host"])
+                if ms is None:
+                    _set_row(row, f"{row['name']}: sem resposta (host bloqueou o teste)", "#E74C3C")
+                    continue
+                if phase == "before":
+                    row["before"] = ms
+                    _set_row(row, f"{row['name']}: {ms} ms", _color(ms))
                 else:
-                    info["lbl"].configure(text=f"{game_name}: Testando Novo Ping...")
-                ro_win.update()
-                
-                ms = get_ping(info["ip"])
-                
-                if not is_after:
-                    info["ms_before"] = ms
-                    if ms is not None:
-                        color = "#2ECC71" if ms < 50 else ("#F1C40F" if ms < 90 else "#E74C3C")
-                        info["lbl"].configure(text=f"{game_name}: {ms} ms", text_color=color)
+                    b = row["before"]
+                    if b is None:
+                        _set_row(row, f"{row['name']}: {ms} ms", _color(ms))
                     else:
-                        info["lbl"].configure(text=f"{game_name}: Falha ao testar", text_color="#E74C3C")
-                else:
-                    ms_before = info["ms_before"]
-                    if ms is not None and ms_before is not None:
-                        # Ensure the ping is always better or equal to show optimization success
-                        if ms >= ms_before:
-                            ms = max(5, ms_before - random.randint(1, 4))
-                            
-                        color = "#2ECC71"
-                        diff = ms_before - ms
-                        sign = "-" if diff > 0 else "+" if diff < 0 else ""
-                        diff_text = f" ({sign}{abs(diff)}ms)" if diff != 0 else " (Mesmo ping)"
-                        info["lbl"].configure(text=f"{game_name}: Antes {ms_before} ms ➔ Depois {ms} ms{diff_text}", text_color=color)
-                    elif ms is not None:
-                        info["lbl"].configure(text=f"{game_name}: Novo {ms} ms", text_color="#2ECC71")
-                    else:
-                        info["lbl"].configure(text=f"{game_name}: Falha no teste", text_color="#E74C3C")
-            
-            if not is_after:
-                btn_opt.configure(state="normal")
+                        diff = b - ms
+                        if diff > 0:
+                            tail = f"melhorou {diff} ms"
+                        elif diff < 0:
+                            tail = f"subiu {abs(diff)} ms"
+                        else:
+                            tail = "sem mudança"
+                        _set_row(row, f"{row['name']}: {b} ms ➔ {ms} ms ({tail})", _color(ms))
 
         def optimize_routes():
-            # 1. Detect installed games
-            installed = self.detect_installed_games()
-            
-            # 2. Open game selection dialog
-            dialog = ctk.CTkToplevel(ro_win)
-            dialog.title("Selecione o Jogo")
-            dialog.geometry("380x220")
-            dialog.attributes("-topmost", True)
-            dialog.grab_set() # Block interaction with back window
-            
-            ctk.CTkLabel(dialog, text="🎮 Otimizador de Rotas", font=ctk.CTkFont(size=16, weight="bold"), text_color="#F39C12").pack(pady=10)
-            ctk.CTkLabel(dialog, text="Detectamos os seguintes jogos no PC.\nSelecione qual você vai jogar para aplicar a rota ideal:", font=ctk.CTkFont(size=11)).pack(pady=5)
-            
-            cb_detected = ctk.CTkComboBox(dialog, values=installed, width=280)
-            cb_detected.pack(pady=10)
-            
-            def apply_selection():
-                chosen_game = cb_detected.get()
-                dialog.destroy()
-                
-                # Update main window dropdown to match user's choice
-                if hasattr(self, 'cb_jogos'):
-                    self.cb_jogos.set(chosen_game)
-                    self.on_game_select(chosen_game)
-                
-                def _do_optimize():
-                    # Force test before if they didn't test yet
-                    if any(info["ms_before"] is None for info in games.values()):
-                        test_pings_now(is_after=False)
-                    
-                    self.after(0, lambda: btn_opt.configure(state="disabled", text="Otimizando..."))
-                    self.log(f"-> Iniciando Otimização Profunda de Rotas para: {chosen_game}...")
-                    
-                    self.run_cmd_live('powershell -Command "Clear-DnsClientCache"')
-                    self.run_cmd_live('powershell -Command "netsh int tcp set global autotuninglevel=normal; netsh int tcp set global chimney=enabled"')
-                    
-                    self.log("-> Injetando Políticas de QoS para Games...")
-                    self.run_cmd_live('reg add "HKLM\\SOFTWARE\\Policies\\Microsoft\\Windows\\QoS" /v "Jogo QoS" /t REG_SZ /d "1" /f')
-                    
-                    no_dns_games = ["Valorant", "Fortnite", "GTA V", "FIFA / EA FC", "League of Legends"]
-                    if chosen_game in no_dns_games:
-                        self.log(f"-> {chosen_game} detectado: Mantendo/Restaurando DNS original (DHCP) para evitar incompatibilidade.")
-                        self.run_cmd_live('powershell -Command "$adapter = Get-NetAdapter | Where-Object {$_.Status -eq \'Up\'} | Select-Object -First 1; if ($adapter) { Set-DnsClientServerAddress -InterfaceIndex $adapter.ifIndex -ResetServerAddresses }"')
-                    else:
-                        self.log("-> Forçando rotas DNS de baixa latência (1.1.1.1 e 8.8.8.8)...")
-                        self.run_cmd_live('powershell -Command "$adapter = Get-NetAdapter | Where-Object {$_.Status -eq \'Up\'} | Select-Object -First 1; if ($adapter) { Set-DnsClientServerAddress -InterfaceIndex $adapter.ifIndex -ServerAddresses (\'1.1.1.1\',\'8.8.8.8\') }"')
-                    
-                    self.log("✅ Rotas Otimizadas com Sucesso! Refazendo o teste de ping...")
-                    
-                    test_pings_now(is_after=True)
-                    
-                    self.after(0, lambda: btn_opt.configure(text="✅ Otimizado! (Ping Melhorado)", state="normal"))
-                    self.after(0, lambda: self.lbl_ping_result.configure(text=f"Ping: Rotas Otimizadas ({chosen_game})", text_color="#2ECC71"))
-                
-                self.run_async(_do_optimize)
-                
-            ctk.CTkButton(dialog, text="⚡ Aplicar Otimização", font=ctk.CTkFont(weight="bold"), fg_color="#C0392B", hover_color="#922B21", width=180, command=apply_selection).pack(pady=10)
-            
-        btn_opt = ctk.CTkButton(ro_win, text="⚡ Melhorar Ping e Rotas (Testar & Otimizar)", font=ctk.CTkFont(weight="bold"), fg_color="#C0392B", hover_color="#922B21", height=50, command=optimize_routes)
-        btn_opt.pack(pady=(10, 20), padx=20, fill="x")
+            chosen = self.call_ui(lambda: self.cb_jogos.get()) if hasattr(self, 'cb_jogos') else ""
+            self.call_ui(lambda: btn_opt.configure(state="disabled", text="Medindo e otimizando..."), wait=False)
+            self.log("→ Medindo latência inicial...")
+            run_test("before")
 
+            self.log("→ Aplicando ajustes de rede (sem alterar o DNS automaticamente)...")
+            self.run_cmd_live('powershell -NoProfile -Command "Clear-DnsClientCache"')
+            self.run_cmd_live('netsh int tcp set global autotuninglevel=normal')
+            self.run_cmd_live('netsh int tcp set supplemental internet congestionprovider=ctcp')
+
+            self.log("→ Medindo latência depois dos ajustes...")
+            run_test("after")
+
+            self.call_ui(lambda: btn_opt.configure(text="✅ Teste concluído (valores reais)", state="normal"), wait=False)
+            if hasattr(self, 'lbl_ping_result'):
+                self.call_ui(lambda: self.lbl_ping_result.configure(text="Ping: rotas testadas (valores reais)", text_color="#2ECC71"), wait=False)
+            self.log("ℹ️ Para trocar o DNS, use os botões de DNS no painel lateral. O DNS ideal varia por provedor.")
+
+        btn_opt = ctk.CTkButton(ro_win, text="⚡ Testar e Otimizar Rotas", font=ctk.CTkFont(weight="bold"),
+                                fg_color="#C0392B", hover_color="#922B21", height=50,
+                                command=lambda: self.run_async(optimize_routes))
+        btn_opt.pack(pady=(10, 20), padx=20, fill="x")
 
     def refresh_metrics_depois(self):
         self.log("Calculando métricas pós-otimização...")
@@ -1042,7 +1244,7 @@ class OtimizadorApp(ctk.CTk):
             try:
                 import subprocess
                 # Count current processes/services using tasklist (faster, no powershell overhead)
-                proc_str = subprocess.check_output('tasklist /NH | find /v "" /c', shell=True, text=True, creationflags=subprocess.CREATE_NO_WINDOW).strip()
+                proc_str = subprocess.check_output('powershell "(Get-Process).Count"', shell=True, text=True, creationflags=subprocess.CREATE_NO_WINDOW).strip()
                 serv_str = subprocess.check_output('powershell "(Get-Service | Where-Object {$_.Status -eq \'Running\'}).Count"', shell=True, text=True, creationflags=subprocess.CREATE_NO_WINDOW).strip()
                 
                 try:
@@ -1052,24 +1254,14 @@ class OtimizadorApp(ctk.CTk):
                     proc_val, serv_val = 0, 0
 
                 def _ui():
-                    # Extract "Antes" values to ensure we never show an increase
-                    try:
-                        antes_p = int(self.lbl_proc_antes.cget("text").split(":")[-1].strip())
-                        antes_s = int(self.lbl_serv_antes.cget("text").split(":")[-1].strip())
-                        
-                        # If the system spawned temporary tasks (VSS, PowerShell), cap the visual number
-                        import random
-                        final_p = min(proc_val, antes_p - random.randint(3, 8))
-                        final_s = min(serv_val, antes_s - random.randint(1, 3))
-                    except:
-                        final_p = proc_val
-                        final_s = serv_val
-
-                    if hasattr(self, 'lbl_proc_depois'):
-                        self.lbl_proc_depois.configure(text=f"{self.t('proc_after')}: {final_p}")
-                    if hasattr(self, 'lbl_serv_depois'):
-                        self.lbl_serv_depois.configure(text=f"{self.t('serv_after')}: {final_s}")
-                    self.log(f"Métricas atualizadas! Processos: {final_p} | Serviços: {final_s}")
+                    # Valores reais medidos agora (sem ajustes cosméticos)
+                    final_p = proc_val if proc_val else "N/D"
+                    final_s = serv_val if serv_val else "N/D"
+                    if hasattr(self, 'lbl_proc_depois') and self.lbl_proc_depois.winfo_exists():
+                        self.lbl_proc_depois.configure(text=f"Agora: {final_p}")
+                    if hasattr(self, 'lbl_serv_depois') and self.lbl_serv_depois.winfo_exists():
+                        self.lbl_serv_depois.configure(text=f"Agora: {final_s}")
+                    self.log(f"Métricas medidas agora: Processos: {final_p} | Serviços em execução: {final_s}")
                     
                 if hasattr(self, 'gui_queue'):
                     self.gui_queue.put(_ui)
@@ -1110,7 +1302,7 @@ class OtimizadorApp(ctk.CTk):
         # Inicia Telemetria ao vivo no Painel (Relógio, Uptime, CPU/RAM/GPU temps & uso)
         self.init_telemetry_hud()
 
-        self.log("Aplicativo Inicializado V9.3.")
+        self.log(f"Aplicativo Inicializado V{APP_VERSION}.")
         self.log("Aguardando leitura de Hardware...")
 
         # Verificação silenciosa de atualização na nuvem (GitHub)
@@ -1134,7 +1326,7 @@ class OtimizadorApp(ctk.CTk):
 
         ctk.CTkLabel(
             brand_frame,
-            text="v9.3 Oficial • Painel Gamer Pro",
+            text=f"v{APP_VERSION} Oficial • Painel Gamer Pro",
             font=ctk.CTkFont(family="Arial", size=11),
             text_color="#8E8AA0"
         ).pack(side="left")
@@ -1146,7 +1338,7 @@ class OtimizadorApp(ctk.CTk):
         # Online Safe Session Badge
         ctk.CTkLabel(
             right_frame,
-            text="🟢 ONLINE - SESSÃO SEGURA",
+            text="🟢 SESSÃO ATIVA",
             font=ctk.CTkFont(size=11, weight="bold"),
             text_color="#10B981",
             fg_color="#0D281E",
@@ -1206,10 +1398,55 @@ class OtimizadorApp(ctk.CTk):
         nums = re.findall(r'\d+', str(v_str))
         return tuple(int(x) for x in nums) if nums else (0, 0)
 
+    def cloud_update_flow(self, manual=False):
+        """Atualização criptografada pelo servidor de chaves. Devolve True se tratou (com ou sem update)."""
+        if not cloud.is_valid():
+            return False
+        info = cloud.fetch_latest()
+        if not info:
+            return False                      # nuvem indisponível: cai no GitHub
+        chk = cloud.check_update(APP_VERSION)
+        if not chk.get("available"):
+            if manual:
+                self.after(0, lambda: messagebox.showinfo("Atualização", f"✅ Você já está na versão mais recente (V{APP_VERSION})."))
+            return True
+        tag = "V" + str(chk["version"])
+        notes = chk.get("notes") or ""
+        if not self.call_ui(lambda: messagebox.askyesno(
+                "Nova versão disponível",
+                f"Nova versão {tag} disponível (você tem V{APP_VERSION}).\n\n{notes}\n\nBaixar e instalar agora? O app reinicia sozinho.")):
+            return True
+
+        def _open_hud():
+            if getattr(self, 'current_hud', None) and self.current_hud.winfo_exists():
+                try: self.current_hud.destroy()
+                except Exception: pass
+            self.current_hud = CyberProgressHUD(self, title=f"Atualizando para {tag}", initial_msg="Baixando da nuvem...")
+        self.after(0, _open_hud)
+        time.sleep(0.3)
+        try:
+            self.log(f"⬇️ Baixando atualização {tag} (criptografada)...")
+            data, _ = cloud.fetch_release(progress=lambda p: self.set_hud_progress(min(95, p), f"Baixando... {p}%"), info=info)
+            self.set_hud_progress(98, "Verificado (SHA-256). Instalando e reiniciando...")
+            cloud.replace_self(data)
+            time.sleep(0.8)
+            os._exit(0)
+        except Exception as e:
+            self.log(f"❌ Atualização pela nuvem falhou: {e}")
+            self.set_hud_progress(100, "❌ Falhou.")
+            self.after(0, lambda err=e: messagebox.showerror("Atualização", f"Não foi possível atualizar:\n{err}"))
+        return True
+
     def check_for_updates(self, manual=False):
         """Verifica na nuvem (GitHub Releases) se há uma nova versão disponível."""
         import urllib.request, json
         from tkinter import messagebox
+
+        try:
+            if self.cloud_update_flow(manual):
+                return
+        except Exception as e:
+            self.log(f"⚠️ Atualização pela nuvem indisponível ({e}); usando GitHub.")
 
         if manual:
             self.log("🌐 Verificando atualizações na nuvem (GitHub)...")
@@ -1218,7 +1455,7 @@ class OtimizadorApp(ctk.CTk):
         req = urllib.request.Request(
             api_url,
             headers={
-                "User-Agent": "BernalOtimizacoes-AutoUpdater/9.3",
+                "User-Agent": f"BernalOtimizacoes-AutoUpdater/{APP_VERSION}",
                 "Accept": "application/vnd.github.v3+json"
             }
         )
@@ -1230,6 +1467,11 @@ class OtimizadorApp(ctk.CTk):
             tag_name = data.get("tag_name", "").strip()
             body_notes = data.get("body", "Melhorias de desempenho e correções de bugs aplicadas.").strip()
             assets = data.get("assets", [])
+            # Hash SHA-256 publicado nas notas (linha "SHA256: <hex>") — usado para conferir o download
+            expected_sha = None
+            mh = re.search(r'sha-?256[^0-9a-f]*([0-9a-fA-F]{64})', body_notes, re.I)
+            if mh:
+                expected_sha = mh.group(1).lower()
 
             # Localiza o executável nos anexos
             download_url = None
@@ -1256,23 +1498,39 @@ class OtimizadorApp(ctk.CTk):
                         break
 
             remote_ver = self.parse_version_tuple(tag_name)
-            local_ver = self.parse_version_tuple("9.3")
+            local_ver = self.parse_version_tuple(APP_VERSION)
 
             if remote_ver > local_ver and download_url:
                 self.log(f"🚀 Nova versão encontrada na nuvem: {tag_name}!")
+                # Também aceita um arquivo .sha256 anexado à release
+                if not expected_sha:
+                    for a in assets:
+                        if a.get("name", "").lower().endswith(".sha256"):
+                            try:
+                                with urllib.request.urlopen(urllib.request.Request(
+                                        a.get("browser_download_url"),
+                                        headers={"User-Agent": "BernalOtimizacoes-AutoUpdater"}), timeout=10) as r2:
+                                    txt = r2.read().decode("utf-8", "replace")
+                                m2 = re.search(r'([0-9a-fA-F]{64})', txt)
+                                if m2:
+                                    expected_sha = m2.group(1).lower()
+                            except Exception:
+                                pass
+                            break
                 release_info = {
                     "tag": tag_name,
                     "notes": body_notes,
                     "url": download_url,
                     "size_mb": asset_size_mb,
-                    "name": asset_name
+                    "name": asset_name,
+                    "sha256": expected_sha,
                 }
                 self.after(0, lambda: self.show_update_available_dialog(release_info))
             else:
                 if manual:
                     self.after(0, lambda: messagebox.showinfo(
                         "Atualizações",
-                        f"✅ Você já está utilizando a versão mais recente!\n\nVersão instalada: V9.3 PRO Oficial\nServidor: Nuvem GitHub sincronizada."
+                        f"✅ Você já está utilizando a versão mais recente!\n\nVersão instalada: V{APP_VERSION}\nServidor: Nuvem GitHub sincronizada."
                     ))
         except urllib.error.HTTPError as e:
             if e.code == 404:
@@ -1280,7 +1538,7 @@ class OtimizadorApp(ctk.CTk):
                 if manual:
                     self.after(0, lambda: messagebox.showinfo(
                         "Nenhuma Atualização",
-                        "✅ O sistema está na versão mais atual (V9.3 PRO)!\n\nNenhuma atualização mais recente foi publicada pelo administrador ainda."
+                        f"✅ O sistema está na versão mais atual (V{APP_VERSION})!\n\nNenhuma atualização mais recente foi publicada pelo administrador ainda."
                     ))
             else:
                 if manual:
@@ -1315,7 +1573,7 @@ class OtimizadorApp(ctk.CTk):
         
         ctk.CTkLabel(
             badge_frame,
-            text=f"Versão Atual: V9.3 PRO  ➔  Nova Versão: {tag}{sz_str}",
+            text=f"Versão Atual: V{APP_VERSION}  ➔  Nova Versão: {tag}{sz_str}",
             font=ctk.CTkFont(size=12, weight="bold"),
             text_color="#10B981"
         ).pack(pady=8)
@@ -1337,7 +1595,7 @@ class OtimizadorApp(ctk.CTk):
             fg_color="#7928CA",
             hover_color="#9333EA",
             height=38,
-            command=lambda: [dlg.destroy(), threading.Thread(target=self.start_download_and_apply_update, args=(info.get("url"), tag, info.get("name")), daemon=True).start()]
+            command=lambda: [dlg.destroy(), threading.Thread(target=self.start_download_and_apply_update, args=(info.get("url"), tag, info.get("name"), info.get("sha256"), int(info.get("size_mb", 0) * 1024 * 1024)), daemon=True).start()]
         )
         btn_apply.pack(side="left", fill="x", expand=True, padx=(0, 6))
 
@@ -1353,8 +1611,111 @@ class OtimizadorApp(ctk.CTk):
         )
         btn_cancel.pack(side="right")
 
-    def start_download_and_apply_update(self, download_url, tag_name, asset_name="BernalOtimizacoes.exe"):
-        """Baixa a nova versão mostrando progresso e aplica reiniciando o app automaticamente."""
+    def _download_file_robust(self, url, dest, headers, size_hint=0):
+        """Baixa com 3 métodos em cascata (Python -> curl.exe -> BITS). Evita ficar preso quando a rede
+        do cliente trava em IPv6/proxy: cada método tem tempo limite curto e o progresso é real."""
+        import urllib.request
+        errors = []
+
+        def _remove():
+            try:
+                if os.path.exists(dest):
+                    os.remove(dest)
+            except Exception:
+                pass
+
+        def _show(done, total):
+            mb = done / (1024 * 1024)
+            if total > 0:
+                pct = min(98, max(6, int(done / total * 92) + 6))
+                self.set_hud_progress(pct, f"Baixando: {mb:.1f} MB de {total / (1024 * 1024):.1f} MB ({pct}%)...")
+            else:
+                self.set_hud_progress(30, f"Baixando: {mb:.1f} MB transferidos...")
+
+        # Método 1: Python (tempo limite curto para não esperar em rota IPv6 quebrada)
+        try:
+            self.set_hud_progress(5, "Conectando ao GitHub (método 1/3)...")
+            req = urllib.request.Request(url, headers=headers)
+            with urllib.request.urlopen(req, timeout=12) as resp:
+                total = int(resp.headers.get("content-length", 0) or 0) or size_hint
+                done, t_last = 0, time.time()
+                self.set_hud_progress(6, "Conectado! Baixando atualização...")
+                with open(dest, "wb") as f_out:
+                    while True:
+                        chunk = resp.read(256 * 1024)
+                        if not chunk:
+                            break
+                        f_out.write(chunk)
+                        done += len(chunk)
+                        if time.time() - t_last >= 0.25:
+                            t_last = time.time()
+                            _show(done, total)
+            if size_hint and os.path.getsize(dest) < size_hint * 0.9:
+                raise IOError("download incompleto")
+            return True
+        except Exception as e:
+            errors.append(f"python: {e}")
+            self.log(f"  método 1 falhou ({e}); tentando curl...")
+            _remove()
+
+        # Método 2: curl.exe (nativo do Windows 10/11), forçando IPv4
+        try:
+            self.set_hud_progress(5, "Conectando ao GitHub (método 2/3: curl)...")
+            cflags = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
+            proc = subprocess.Popen(["curl.exe", "-L", "-4", "--fail", "--silent", "--show-error",
+                                     "--connect-timeout", "15", "--retry", "3", "-A", headers.get("User-Agent", "Mozilla/5.0"),
+                                     "-o", dest, url], stdout=subprocess.PIPE, stderr=subprocess.PIPE, creationflags=cflags)
+            t0, last_size, last_move = time.time(), -1, time.time()
+            while proc.poll() is None:
+                time.sleep(0.5)
+                cur = os.path.getsize(dest) if os.path.exists(dest) else 0
+                if cur != last_size:
+                    last_size, last_move = cur, time.time()
+                if cur > 0:
+                    _show(cur, size_hint)
+                if time.time() - last_move > 45:
+                    proc.kill()
+                    raise IOError("sem progresso por 45s")
+            if proc.returncode != 0:
+                raise IOError((proc.stderr.read() or b"").decode("utf-8", "replace").strip() or f"curl código {proc.returncode}")
+            if size_hint and os.path.getsize(dest) < size_hint * 0.9:
+                raise IOError("download incompleto")
+            return True
+        except Exception as e:
+            errors.append(f"curl: {e}")
+            self.log(f"  método 2 falhou ({e}); tentando BITS...")
+            _remove()
+
+        # Método 3: BITS do Windows (usa a configuração de rede/proxy do sistema)
+        try:
+            self.set_hud_progress(5, "Conectando ao GitHub (método 3/3: BITS)...")
+            ps = f"Start-BitsTransfer -Source '{url}' -Destination '{dest}' -ErrorAction Stop"
+            cflags = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
+            proc = subprocess.Popen(["powershell", "-NoProfile", "-Command", ps], stdout=subprocess.PIPE,
+                                    stderr=subprocess.PIPE, creationflags=cflags)
+            last_size, last_move = -1, time.time()
+            while proc.poll() is None:
+                time.sleep(0.5)
+                cur = os.path.getsize(dest) if os.path.exists(dest) else 0
+                if cur != last_size:
+                    last_size, last_move = cur, time.time()
+                if cur > 0:
+                    _show(cur, size_hint)
+                if time.time() - last_move > 60:
+                    proc.kill()
+                    raise IOError("sem progresso por 60s")
+            if proc.returncode != 0:
+                raise IOError((proc.stderr.read() or b"").decode("utf-8", "replace").strip()[:200] or "BITS falhou")
+            return True
+        except Exception as e:
+            errors.append(f"bits: {e}")
+            _remove()
+
+        raise IOError("Não foi possível baixar de nenhum método. " + " | ".join(errors) +
+                      "\nBaixe manualmente em: https://github.com/Bernalf5138/Bernal-Otimizacoes/releases/latest")
+
+    def start_download_and_apply_update(self, download_url, tag_name, asset_name="BernalOtimizacoes.exe", expected_sha256=None, size_hint=0):
+        """Baixa a nova versão, confere o SHA-256 e só então aplica, reiniciando o app."""
         import urllib.request, tempfile, shutil
 
         self.log(f"⬇️ Iniciando download da atualização {tag_name}...")
@@ -1377,37 +1738,38 @@ class OtimizadorApp(ctk.CTk):
                 "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
                 "Accept": "*/*"
             }
-            req = urllib.request.Request(download_url, headers=headers)
-            with urllib.request.urlopen(req, timeout=60) as resp:
-                total_size = int(resp.headers.get("content-length", 0) or 0)
-                downloaded = 0
-                chunk_size = 256 * 1024 # 256KB chunks
-                t_last = time.time()
-                
-                if total_size > 0:
-                    self.set_hud_progress(6, f"Conectado! Baixando {total_size / (1024*1024):.1f} MB...")
-                else:
-                    self.set_hud_progress(6, "Conectado! Baixando atualização...")
+            self._download_file_robust(download_url, temp_dest, headers, size_hint)
 
-                with open(temp_dest, "wb") as f_out:
-                    while True:
-                        chunk = resp.read(chunk_size)
-                        if not chunk:
-                            break
-                        f_out.write(chunk)
-                        downloaded += len(chunk)
-                        now = time.time()
-                        if now - t_last >= 0.25:
-                            t_last = now
-                            mb_cur = downloaded / (1024 * 1024)
-                            if total_size > 0:
-                                mb_tot = total_size / (1024 * 1024)
-                                pct = min(98, max(6, int((downloaded / total_size) * 94) + 5))
-                                self.set_hud_progress(pct, f"Baixando: {mb_cur:.1f} MB de {mb_tot:.1f} MB ({pct}%)...")
-                            else:
-                                self.set_hud_progress(30, f"Baixando: {mb_cur:.1f} MB transferidos...")
+            # Verificação de integridade / autenticidade do arquivo baixado
+            if expected_sha256:
+                self.set_hud_progress(99, "Verificando integridade do arquivo (SHA-256)...")
+                h = hashlib.sha256()
+                with open(temp_dest, "rb") as vf:
+                    for blk in iter(lambda: vf.read(1024 * 1024), b""):
+                        h.update(blk)
+                got = h.hexdigest().lower()
+                if got != expected_sha256.lower():
+                    try:
+                        os.remove(temp_dest)
+                    except Exception:
+                        pass
+                    self.log(f"❌ Atualização RECUSADA: hash não confere.\n   esperado: {expected_sha256}\n   obtido:   {got}")
+                    self.set_hud_progress(100, "❌ Atualização recusada (arquivo não confere).")
+                    self.after(0, lambda: messagebox.showerror("Atualização cancelada",
+                        "O arquivo baixado não corresponde ao hash de segurança publicado.\n\n"
+                        "A atualização foi CANCELADA para proteger seu computador. Tente novamente mais tarde."))
+                    return
+                self.log("✅ Integridade confirmada (SHA-256 confere).")
+            else:
+                self.log("⚠️ Esta release não publicou hash SHA-256; não foi possível verificar a autenticidade.")
+                if not self.call_ui(lambda: messagebox.askyesno("Atualização sem verificação",
+                        "Esta atualização não trouxe um hash de segurança (SHA-256) para conferência.\n\n"
+                        "Instalar mesmo assim? (Recomendado: só continue se você confia na origem.)")):
+                    self.log("Atualização cancelada pelo usuário (sem hash).")
+                    self.set_hud_progress(100, "Atualização cancelada.")
+                    return
 
-            self.set_hud_progress(100, "✅ Download 100% concluído! Instalando e reiniciando...")
+            self.set_hud_progress(100, "✅ Download concluído e verificado! Instalando e reiniciando...")
             time.sleep(0.8)
 
             # Destino principal e backup local
@@ -1472,6 +1834,8 @@ del "%~f0" >nul 2>&1
         except Exception as e:
             self.set_hud_progress(100, f"❌ Erro ao baixar atualização: {e}")
             self.log(f"❌ Erro no Auto-Updater: {e}")
+            self.after(0, lambda m=str(e): messagebox.showerror("Falha na atualização",
+                "Não consegui baixar a atualização automaticamente.\n\n" + m[:600]))
 
     def setup_nav_sidebar(self):
         self.nav_frame = ctk.CTkFrame(self.body_frame, fg_color="#120E22", width=205, corner_radius=12)
@@ -1521,7 +1885,7 @@ del "%~f0" >nul 2>&1
         safe_frame.pack(fill="x", padx=10, pady=(6, 12))
         ctk.CTkLabel(
             safe_frame,
-            text="🛡️ Anti-Cheat Safe\n100% Protegido contra Bans",
+            text="🛡️ Ajustes de registro/energia\nNão injeta nada em jogos",
             font=ctk.CTkFont(size=10, weight="bold"),
             text_color="#10B981",
             justify="center"
@@ -1767,7 +2131,7 @@ del "%~f0" >nul 2>&1
         card_ver.pack(fill="x", padx=10, pady=(6, 12))
         ctk.CTkLabel(
             card_ver,
-            text="⚡ VERSÃO 9.3 PRO OFICIAL\nBernal Otimizações © 2026\n● SISTEMA CALIBRADO",
+            text=f"⚡ VERSÃO {APP_VERSION} OFICIAL\nBernal Otimizações © 2026",
             font=ctk.CTkFont(size=10, weight="bold"),
             text_color="#00D2FF",
             justify="center"
@@ -1812,8 +2176,8 @@ del "%~f0" >nul 2>&1
         self.lbl_chip_ram_val = make_chip(0, 2, "⚡ MEMÓRIA RAM", "Lendo RAM...")
 
         self.lbl_chip_disk_val = make_chip(1, 0, "💾 DISCO C:", "Lendo Espaço...")
-        self.lbl_chip_tpm_val = make_chip(1, 1, "🔒 TPM 2.0", "🟢 Presente & Ativo")
-        self.lbl_chip_sec_val = make_chip(1, 2, "🛡️ SECURE BOOT", "🟢 Habilitado (UEFI)")
+        self.lbl_chip_tpm_val = make_chip(1, 1, "🔒 TPM 2.0", "Verificando...")
+        self.lbl_chip_sec_val = make_chip(1, 2, "🛡️ SECURE BOOT", "Verificando...")
 
         # Hero Card: Otimização Geral Inteligente
         hero_frame = ctk.CTkFrame(scroll, fg_color="#1A1236", corner_radius=12, border_width=1, border_color="#7928CA")
@@ -1828,7 +2192,7 @@ del "%~f0" >nul 2>&1
 
         ctk.CTkLabel(
             hero_frame,
-            text="Aplica ajustes de registro de baixa latência, desativa telemetria inútil, limpa caches do Windows,\notimiza TCP/DNS e força todos os núcleos da CPU para máxima estabilidade em jogos.",
+            text="Aplica ajustes de registro de baixa latência, desativa telemetria inútil, limpa caches do Windows,\notimiza TCP/DNS, libera os núcleos da CPU e aplica o MODO FPS nos seus jogos (prioridade alta + GPU dedicada).",
             font=ctk.CTkFont(size=11),
             text_color="#C4B5FD",
             justify="left"
@@ -1845,7 +2209,7 @@ del "%~f0" >nul 2>&1
             command=lambda: self.run_async(self.auto_optimize)
         )
         btn_hero.pack(fill="x", padx=16, pady=(4, 10))
-        ToolTip(btn_hero, "Faz tudo sozinho: Aplica plano de energia, otimiza visual, limpa barra de tarefas, resfria o PC e limpa Lixo/RAM.")
+        ToolTip(btn_hero, "Faz tudo sozinho: Aplica plano de energia, otimiza visual, limpa barra de tarefas, resfria o PC e limpa Lixo/RAM e aplica o Modo FPS em todos os jogos instalados.")
 
         # Metrics bar inside/below Hero
         metrics_frame = ctk.CTkFrame(hero_frame, fg_color="#140E29", corner_radius=8)
@@ -2600,10 +2964,22 @@ del "%~f0" >nul 2>&1
         if wall_path and os.path.exists(wall_path):
             try:
                 ctypes.windll.user32.SystemParametersInfoW(20, 0, wall_path, 3)
-                if is_official or "Bernal" in wall_name:
-                    self.run_cmd_live('reg add "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize" /v "AppsUseLightTheme" /t REG_DWORD /d 0 /f')
-                    self.run_cmd_live('reg add "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize" /v "SystemUsesLightTheme" /t REG_DWORD /d 0 /f')
-                    self.log(f"✅ Tema Oficial Bernal aplicado com sucesso!")
+                # Define o Modo Escuro/Claro do Windows conforme o wallpaper escolhido
+                nome = f"{wall_name} {title}".lower()
+                theme_val = None
+                if is_official or "bernal" in nome or "dark" in nome or "escuro" in nome or "obsidian" in nome or "night" in nome:
+                    theme_val = 0  # escuro
+                elif "light" in nome or "claro" in nome or "white" in nome or "branco" in nome:
+                    theme_val = 1  # claro
+                if theme_val is not None:
+                    self.run_cmd_live(f'reg add "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize" /v "AppsUseLightTheme" /t REG_DWORD /d {theme_val} /f')
+                    self.run_cmd_live(f'reg add "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize" /v "SystemUsesLightTheme" /t REG_DWORD /d {theme_val} /f')
+                    # Avisa o Windows para atualizar a cor/barra de tarefas na hora (sem reiniciar)
+                    try:
+                        ctypes.windll.user32.SendMessageTimeoutW(0xFFFF, 0x001A, 0, "ImmersiveColorSet", 0x0002, 5000, None)
+                    except Exception:
+                        pass
+                    self.log("✅ Modo Escuro aplicado!" if theme_val == 0 else "✅ Modo Claro aplicado!")
                 self.log(f"✅ Papel de Parede '{title}' aplicado com sucesso no Windows!")
                 messagebox.showinfo("Sucesso", f"Papel de Parede '{title}' aplicado com sucesso na sua Área de Trabalho!")
             except Exception as e:
@@ -2647,8 +3023,8 @@ del "%~f0" >nul 2>&1
             ToolTip(b, tip)
             return b
 
-        make_prof_card(0, 0, "MAX FPS (Low Graphics)", "Força CPU a 100%, reduz serviços visuais.", "Aplicar Max FPS", "#1E8449", "#145A32",
-                       lambda: self.run_premium(self.apply_profile, "max"), "Ideal para jogos competitivos (CS2, Valorant, Warzone).")
+        make_prof_card(0, 0, "🎮 MODO FPS (Otimiza Meus Jogos)", "Acha seus jogos e deixa cada um com prioridade alta, GPU dedicada e tela cheia sem lag.", "Aplicar Modo FPS", "#DC2626", "#B91C1C",
+                       lambda: self.run_premium(self.apply_fps_mode), "Permanente: vale toda vez que o jogo abrir. Ideal para CS2, Valorant, Warzone, Fortnite, FIFA e outros.")
 
         make_prof_card(0, 1, "BALANCED (Equilibrado)", "Equilibra desempenho e fidelidade gráfica.", "Aplicar Balanced", "#1A5276", "#154360",
                        lambda: self.run_async(self.apply_profile, "med"), "Recomendado para uso geral e a maioria dos jogos.")
@@ -2677,10 +3053,7 @@ del "%~f0" >nul 2>&1
             command=lambda: self.run_async(self.apply_profile, "revert")
         )
         self.btn_revert.pack(fill="x", padx=14, pady=(0, 10))
-        ToolTip(self.btn_revert, "Desfaz configurações de energia e visual, voltando o computador para o jeito de fábrica.")
-
-        if not self.is_admin:
-            self.btn_revert.configure(state="disabled")
+        ToolTip(self.btn_revert, "Desfaz os ajustes feitos pelo app (energia, visual, rede, serviços, mouse, RAM) e abre a Restauração do Sistema.")
 
         return scroll
 
@@ -2728,8 +3101,7 @@ del "%~f0" >nul 2>&1
             command=lambda: self.run_premium(self.apply_game_profile)
         )
         self.btn_aplicar_jogo.pack(fill="x", padx=14, pady=(8, 12))
-        ToolTip(self.btn_aplicar_jogo, "Analisa seu hardware e aplica o melhor perfil de FPS + áudio para o jogo selecionado.")
-        self.btn_aplicar_jogo.configure(state="disabled")
+        ToolTip(self.btn_aplicar_jogo, "Analisa seu hardware e aplica o melhor perfil de FPS + áudio para o jogo selecionado. No Warzone, um backup das configs é feito antes.")
 
         # Warzone Specific Card
         wz_card = ctk.CTkFrame(scroll, fg_color="#181230", corner_radius=10, border_width=1, border_color="#1565C0")
@@ -2816,6 +3188,36 @@ del "%~f0" >nul 2>&1
             text_color="#9CA3AF"
         ).pack(anchor="w", padx=14, pady=(0, 10))
 
+        # Boost + Liberar espaço (destaque no topo)
+        boost_card = ctk.CTkFrame(scroll, fg_color="#1A1236", corner_radius=12, border_width=1, border_color="#7928CA")
+        boost_card.pack(fill="x", pady=(0, 10), padx=2)
+        ctk.CTkLabel(boost_card, text="🚀 Boost de Responsividade & Limpeza de Disco", font=ctk.CTkFont(size=14, weight="bold"), text_color="#00D2FF").pack(anchor="w", padx=14, pady=(12, 2))
+        ctk.CTkLabel(boost_card, text="Deixa o PC mais fluido: boot mais rápido, apps abrindo mais rápido e menos input lag. Tudo reversível.",
+                     font=ctk.CTkFont(size=11), text_color="#C4B5FD", justify="left").pack(anchor="w", padx=14, pady=(0, 8))
+        boost_row = ctk.CTkFrame(boost_card, fg_color="transparent")
+        boost_row.pack(fill="x", padx=12, pady=(0, 12))
+        boost_row.columnconfigure((0, 1), weight=1)
+        bt1 = ctk.CTkButton(boost_row, text="🚀 Aplicar Boost (Fluidez Máxima)", font=ctk.CTkFont(size=12, weight="bold"),
+                            fg_color="#7928CA", hover_color="#9333EA", height=40,
+                            command=lambda: self.run_premium(self.apply_turbo_boost))
+        bt1.grid(row=0, column=0, padx=4, sticky="ew")
+        ToolTip(bt1, "Boot mais rápido, menus/apps mais rápidos, Prefetch ativo e Game DVR desligado (menos input lag). Reversível.", "🚀 BOOST")
+        bt2 = ctk.CTkButton(boost_row, text="🧽 Liberar Espaço no Disco C:", font=ctk.CTkFont(size=12, weight="bold"),
+                            fg_color="#059669", hover_color="#047857", height=40,
+                            command=lambda: self.run_async(self.free_disk_space))
+        bt2.grid(row=0, column=1, padx=4, sticky="ew")
+        ToolTip(bt2, "Apaga só lixo seguro (temporários, caches, lixeira, componentes antigos do Windows) e mostra quanto liberou.", "🧽 LIBERAR ESPAÇO")
+        bt3 = ctk.CTkButton(boost_row, text="🎮 MODO FPS: Otimizar Meus Jogos", font=ctk.CTkFont(size=12, weight="bold"),
+                            fg_color="#DC2626", hover_color="#B91C1C", height=44,
+                            command=lambda: self.run_premium(self.apply_fps_mode))
+        bt3.grid(row=1, column=0, padx=4, pady=(8, 0), sticky="ew")
+        ToolTip(bt3, "Acha os jogos instalados (Steam, Epic, Riot, Battle.net...) e deixa cada um com prioridade alta de CPU/disco, GPU dedicada e tela cheia sem lag - permanente. Ainda reforça ao vivo enquanto joga.", "🎮 MODO FPS")
+        bt4 = ctk.CTkButton(boost_row, text="➕ Adicionar Jogo (.exe)", font=ctk.CTkFont(size=12, weight="bold"),
+                            fg_color="#2563EB", hover_color="#1D4ED8", height=44,
+                            command=lambda: self.run_premium(self.add_game_manually))
+        bt4.grid(row=1, column=1, padx=4, pady=(8, 0), sticky="ew")
+        ToolTip(bt4, "Escolha o .exe de qualquer jogo que não foi encontrado sozinho.", "➕ ADICIONAR JOGO")
+
         # Bloco de Ações Rápidas (Movido do Painel / Terceiro Print)
         quick_top = ctk.CTkFrame(scroll, fg_color="transparent")
         quick_top.pack(fill="x", pady=(0, 8), padx=2)
@@ -2825,10 +3227,10 @@ del "%~f0" >nul 2>&1
         c1 = ctk.CTkFrame(quick_top, fg_color="#181230", corner_radius=10, border_width=1, border_color="#241B44")
         c1.grid(row=0, column=0, padx=4, pady=2, sticky="nsew")
         ctk.CTkLabel(c1, text="🧹 Limpeza de Cache", font=ctk.CTkFont(size=12, weight="bold"), text_color="#FFFFFF").pack(anchor="w", padx=12, pady=(10, 2))
-        ctk.CTkLabel(c1, text="Limpa TEMP, Prefetch e esvazia RAM.", font=ctk.CTkFont(size=10), text_color="#9CA3AF").pack(anchor="w", padx=12, pady=(0, 8))
+        ctk.CTkLabel(c1, text="Limpa arquivos temporários do Windows.", font=ctk.CTkFont(size=10), text_color="#9CA3AF").pack(anchor="w", padx=12, pady=(0, 8))
         btn_c1 = ctk.CTkButton(c1, text="Limpar Agora", font=ctk.CTkFont(size=11, weight="bold"), fg_color="#E67E22", hover_color="#D35400", height=30, command=lambda: self.run_async(self.cache_cleaner))
         btn_c1.pack(fill="x", padx=12, pady=(0, 10))
-        ToolTip(btn_c1, "Esvazia pastas temporárias (%TEMP%, Prefetch) e limpa a memória RAM em standby instantaneamente.", "🧹 LIMPEZA DE CACHE")
+        ToolTip(btn_c1, "Esvazia as pastas temporárias do Windows (%TEMP% e Windows\\Temp). Não mexe no Prefetch.", "🧹 LIMPEZA DE CACHE")
 
         # Card 2: Monitor BitLocker
         c2 = ctk.CTkFrame(quick_top, fg_color="#181230", corner_radius=10, border_width=1, border_color="#241B44")
@@ -2897,7 +3299,7 @@ del "%~f0" >nul 2>&1
                 ToolTip(b, tip, title)
             return b
 
-        add_tool_btn(col1, "🧹 Limpador de Lixo Total (Cache)", "#27AE60", "#1E8449", lambda: self.run_async(self.cache_cleaner), "Limpa %TEMP%, Prefetch, crash dumps e logs antigos de jogos e do Windows.", "🧹 LIMPEZA TOTAL")
+        add_tool_btn(col1, "🧹 Limpador de Lixo Total (Cache)", "#27AE60", "#1E8449", lambda: self.run_async(self.cache_cleaner), "Limpa %TEMP%, Windows\\Temp, Lixeira e cache de atualização do Windows.", "🧹 LIMPEZA TOTAL")
         add_tool_btn(col1, "💾 Criar Ponto de Restauração", "#2980B9", "#1F618D", lambda: self.run_async(lambda: self.create_restore_point(force_visible=True)), "Gera um backup instantâneo de segurança do sistema para desfazer alterações se necessário.", "💾 PONTO RESTAURAÇÃO")
         add_tool_btn(col1, "🔧 Reparar Arquivos Corrompidos", "#C0392B", "#922B21", lambda: self.run_premium(self.fix_corrupted_files), "Executa SFC /scannow e reparo de imagens DISM para restaurar DLLs corrompidas do Windows.", "🔧 REPARAR ARQUIVOS")
         add_tool_btn(col1, "📉 Reduzir Uso de RAM", "#F39C12", "#D68910", lambda: self.run_premium(self.reduce_ram_usage), "Força o esvaziamento imediato da memória de trabalho de aplicativos ociosos.", "📉 REDUZIR RAM")
@@ -2917,6 +3319,29 @@ del "%~f0" >nul 2>&1
         add_tool_btn(col2, "🖥️ App Oficial da GPU", "#1ABC9C", "#16A085", lambda: self.run_premium(self.install_gpu_app), "Identifica seu fabricante de vídeo (NVIDIA/AMD/Intel) e abre o painel oficial de controle.", "🖥️ APP OFICIAL GPU")
         add_tool_btn(col2, "📊 Instalar MSI Afterburner", "#E74C3C", "#C0392B", lambda: self.run_async(self.install_afterburner), "Instala o MSI Afterburner com RivaTuner para monitorar FPS, uso de hardware e overclock seguro.", "📊 MSI AFTERBURNER")
         ctk.CTkFrame(col2, height=6, fg_color="transparent").pack()
+
+        # Card Recursos Extras (Defender, IE, Desktop, Chrome, Drivers, Áudio FPS)
+        card_x = ctk.CTkFrame(scroll, fg_color="#181230", corner_radius=10, border_width=1, border_color="#241B44")
+        card_x.pack(fill="x", padx=2, pady=6)
+        ctk.CTkLabel(card_x, text="🧰 Sistema, Drivers & Áudio FPS", font=ctk.CTkFont(weight="bold", size=13), text_color="#F1C40F").pack(anchor="w", padx=14, pady=(10, 6))
+        x_grid = ctk.CTkFrame(card_x, fg_color="transparent")
+        x_grid.pack(fill="x", padx=12, pady=(0, 10))
+        x_grid.columnconfigure((0, 1), weight=1)
+        extras_btns = [
+            ("🛡️ Desativar Windows Defender", "#C0392B", "#922B21", self.disable_defender, "Desliga a proteção em tempo real do Defender e confirma o resultado. Se a Proteção contra Adulteração estiver ligada, abre a Segurança do Windows para você desligar.", "🛡️ DEFENDER OFF"),
+            ("✅ Reativar Windows Defender", "#27AE60", "#1E8449", self.enable_defender, "Remove as políticas e liga a proteção em tempo real novamente.", "✅ DEFENDER ON"),
+            ("🖥️ Limpar Área de Trabalho", "#2980B9", "#1F618D", self.clean_desktop, "Manda para a Lixeira atalhos quebrados, arquivos temporários/vazios e pastas vazias. Mostra a lista antes.", "🖥️ LIMPAR DESKTOP"),
+            ("🗑️ Remover Internet Explorer", "#8E44AD", "#71368A", self.remove_internet_explorer, "Remove o recurso Internet Explorer e seus atalhos.", "🗑️ REMOVER IE"),
+            ("🌐 Chrome como Padrão", "#F39C12", "#D68910", self.set_chrome_default, "Instala o Chrome se faltar e o define como padrão para links, .html e .pdf.", "🌐 CHROME PADRÃO"),
+            ("🔄 Atualizar Drivers (sem Booster)", "#16A085", "#12806A", self.update_drivers_native, "Cria ponto de restauração, reescaneia o hardware, instala drivers do Windows Update e abre a página oficial da sua placa de vídeo.", "🔄 DRIVERS"),
+            ("🎧 Ativar Áudio FPS (passos/tiros)", "#E74C3C", "#C0392B", self.audio_fps_enable, "Instala o Equalizer APO e aplica um perfil que destaca passos, recarga e tiros e reduz explosões/graves.", "🎧 ÁUDIO FPS"),
+            ("🔇 Desativar Áudio FPS", "#7F8C8D", "#626567", self.audio_fps_disable, "Volta o som ao normal sem desinstalar nada.", "🔇 ÁUDIO NORMAL"),
+        ]
+        for i, (txt, c, h, fn, tip, ttl) in enumerate(extras_btns):
+            b = ctk.CTkButton(x_grid, text=txt, fg_color=c, hover_color=h, height=32, font=ctk.CTkFont(size=11, weight="bold"), command=lambda f=fn: self.run_async(f))
+            b.grid(row=i // 2, column=i % 2, padx=3, pady=3, sticky="ew")
+            ToolTip(b, tip, ttl)
+
 
         # Card Launchers Gamers & Plataformas (Pacote Gamer - Battle.net, EA Sports, etc.)
         card_launchers = ctk.CTkFrame(scroll, fg_color="#181230", corner_radius=10, border_width=1, border_color="#241B44")
@@ -3071,6 +3496,19 @@ del "%~f0" >nul 2>&1
             height=42,
             command=lambda: self.run_async(self.diagnose_and_fix_bugs)
         ).pack(fill="x", padx=14, pady=(0, 14))
+
+        # Detector de Travamentos Card
+        c_st = ctk.CTkFrame(scroll, fg_color="#181230", corner_radius=10, border_width=1, border_color="#00D2FF")
+        c_st.pack(fill="x", padx=2, pady=6)
+        ctk.CTkLabel(c_st, text="🔎 Detector de Travamentos (Discord, overlays, gravação)", font=ctk.CTkFont(size=14, weight="bold"), text_color="#00D2FF").pack(anchor="w", padx=14, pady=(12, 2))
+        ctk.CTkLabel(
+            c_st,
+            text="Procura o que costuma travar o jogo e deixar o PC pesado:\n• Gravação em segundo plano (Game DVR) ligada\n• Overlays do Discord, Xbox Game Bar, NVIDIA, RivaTuner, OBS\n• Plano de energia fraco, excesso de programas na inicialização, disco cheio",
+            font=ctk.CTkFont(size=11), text_color="#CBD5E1", justify="left"
+        ).pack(anchor="w", padx=14, pady=(0, 10))
+        ctk.CTkButton(c_st, text="🔎 Procurar Causas de Travamento", fg_color="#2563EB", hover_color="#1D4ED8",
+                      font=ctk.CTkFont(size=13, weight="bold"), height=40,
+                      command=self.open_stutter_detector).pack(fill="x", padx=14, pady=(0, 14))
 
         # Warzone Doctor / Game Crashes Card
         c_wz = ctk.CTkFrame(scroll, fg_color="#181230", corner_radius=10, border_width=1, border_color="#10B981")
@@ -3390,12 +3828,12 @@ del "%~f0" >nul 2>&1
     # --- MOTHERBOARD, BIOS, DISPLAY HZ & VIRTUAL RAM ---
     def get_motherboard_and_bios(self):
         info = {
-            "mb_vendor": "ASUSTeK COMPUTER INC.",
-            "mb_model": "TUF B360M-E GAMING",
-            "bios_vendor": "American Megatrends Inc.",
-            "bios_ver": "3202",
-            "bios_date": "07/10/2021",
-            "bios_status": "🟢 BIOS Normal",
+            "mb_vendor": "N/D",
+            "mb_model": "N/D",
+            "bios_vendor": "N/D",
+            "bios_ver": "N/D",
+            "bios_date": "N/D",
+            "bios_status": "⚪ Status da BIOS não verificado",
             "is_outdated": False,
             "search_query": ""
         }
@@ -3429,7 +3867,10 @@ del "%~f0" >nul 2>&1
         except Exception:
             pass
 
-        info["search_query"] = f"{info['mb_vendor']} {info['mb_model']} BIOS update download"
+        if info["mb_vendor"] == "N/D" and info["mb_model"] == "N/D":
+            info["search_query"] = "atualizar BIOS placa-mae"
+        else:
+            info["search_query"] = f"{info['mb_vendor']} {info['mb_model']} BIOS update download"
         return info
 
     def open_bios_support_page(self):
@@ -3522,6 +3963,7 @@ del "%~f0" >nul 2>&1
             self.set_hud_progress(30, "Restaurando gerenciamento automático de memória virtual...")
             self.run_cmd_live('powershell -NoProfile -NonInteractive -Command "Set-CimInstance -Query \'Select * from Win32_ComputerSystem\' -Property @{AutomaticManagedPagefile=$True}"')
             self.run_cmd_live('reg delete "HKLM\\SYSTEM\\CurrentControlSet\\Control\\Session Manager\\Memory Management" /v PagingFiles /f')
+            self.run_cmd_live('reg add "HKLM\\SYSTEM\\CurrentControlSet\\Control\\Session Manager\\Memory Management" /v DisablePagingExecutive /t REG_DWORD /d 0 /f')
             self.allocated_vram = 0
             self.set_hud_progress(100, "Memória Virtual restaurada para Automático do Windows!")
             
@@ -3551,10 +3993,10 @@ del "%~f0" >nul 2>&1
                 self.lbl_vram_status.configure(text=f"✅ +{gb_size} GB Alocado no C:", text_color="#00D2FF")
             if hasattr(self, 'lbl_chip_ram_val') and self.lbl_chip_ram_val.winfo_exists():
                 s_ram = getattr(self, 'sys_ram', 16)
-                self.lbl_chip_ram_val.configure(text=f"{s_ram} GB + {gb_size}GB Virt")
+                self.lbl_chip_ram_val.configure(text=f"{s_ram} GB (+ pagefile {gb_size} GB)")
         self.after(0, _update_alloc_ui)
 
-        self.after(0, lambda: messagebox.showinfo("RAM Virtual Expandida", f"🚀 +{gb_size} GB de Memória Virtual alocados com sucesso no seu SSD/HD!\n\nSeu sistema agora conta com {getattr(self, 'sys_ram', 16)} GB Físicos + {gb_size} GB Virtuais no C:.\nEvita travamentos por 'Out of Memory' e quedas de FPS em jogos pesados como Warzone e GTA V."))
+        self.after(0, lambda: messagebox.showinfo("Arquivo de Paginação Ajustado", f"✅ Arquivo de paginação fixo de {gb_size} GB configurado no disco C:.\n\nIsto NÃO é memória RAM real — é espaço em disco que o Windows usa quando a RAM enche. Ajuda a evitar erros de 'memória insuficiente', mas é bem mais lento que RAM física.\n\nReinicie o PC para aplicar."))
 
     def measure_dns_latency(self, host, port=53, timeout=1.2):
         """Mede a latência real de DNS via socket TCP/UDP direto (sem spawn de CMD, sem timeout)."""
@@ -3649,14 +4091,14 @@ del "%~f0" >nul 2>&1
                                 col_cf = "#10B981" if cf < 40 else ("#F59E0B" if cf < 80 else "#EF4444")
                                 self.lbl_ping_cf.configure(text=f"⚡ Cloudflare (1.1.1.1): {cf} ms", text_color=col_cf)
                             else:
-                                self.lbl_ping_cf.configure(text="⚡ Cloudflare (1.1.1.1): 25 ms", text_color="#10B981")
+                                self.lbl_ping_cf.configure(text="⚡ Cloudflare (1.1.1.1): sem resposta", text_color="#9CA3AF")
 
                         if hasattr(self, 'lbl_ping_gg') and self.lbl_ping_gg.winfo_exists():
                             if gg is not None:
                                 col_gg = "#10B981" if gg < 40 else ("#F59E0B" if gg < 80 else "#EF4444")
                                 self.lbl_ping_gg.configure(text=f"⚡ Google (8.8.8.8): {gg} ms", text_color=col_gg)
                             else:
-                                self.lbl_ping_gg.configure(text="⚡ Google (8.8.8.8): 24 ms", text_color="#10B981")
+                                self.lbl_ping_gg.configure(text="⚡ Google (8.8.8.8): sem resposta", text_color="#9CA3AF")
 
                     if hasattr(self, 'gui_queue'):
                         self.gui_queue.put(_update)
@@ -3707,8 +4149,44 @@ del "%~f0" >nul 2>&1
     def init_telemetry_hud(self):
         self.gpu_temp_cached = None
         self.gpu_util_cached = None
+        self.cpu_temp_cached = None
+        self._cpu_temp_source = None   # None=ainda não sei, False=sem sensor
         self.last_gpu_check = 0
+        self.last_cpu_temp_check = 0
         self.update_telemetry_hud()
+
+    def _read_cpu_temp(self):
+        """Lê a temperatura real da CPU via WMI. Nem todo PC expõe sensor por WMI; então pode ficar N/D."""
+        if self._cpu_temp_source is False:
+            return
+        import subprocess
+        # 1) LibreHardwareMonitor / OpenHardwareMonitor (se o cliente tiver aberto)
+        for ns in (r"root\LibreHardwareMonitor", r"root\OpenHardwareMonitor"):
+            try:
+                ps = (f"$s = Get-CimInstance -Namespace '{ns}' -ClassName Sensor -ErrorAction Stop | "
+                      "Where-Object { $_.SensorType -eq 'Temperature' -and $_.Name -match 'CPU' }; "
+                      "if ($s) { [int](($s | Measure-Object -Property Value -Maximum).Maximum) }")
+                out = subprocess.check_output(["powershell", "-NoProfile", "-Command", ps], text=True, timeout=6,
+                                              creationflags=subprocess.CREATE_NO_WINDOW).strip()
+                if out:
+                    self.cpu_temp_cached = int(float(out))
+                    self._cpu_temp_source = ns
+                    return
+            except Exception:
+                pass
+        # 2) WMI ACPI thermal zone (décimos de Kelvin). Muitas vezes é a temp da placa, não da CPU.
+        try:
+            ps = ("$t = Get-CimInstance -Namespace 'root/wmi' -ClassName MSAcpi_ThermalZoneTemperature -ErrorAction Stop; "
+                  "if ($t) { [int]((($t | Measure-Object -Property CurrentTemperature -Maximum).Maximum/10) - 273.15) }")
+            out = subprocess.check_output(["powershell", "-NoProfile", "-Command", ps], text=True, timeout=6,
+                                          creationflags=subprocess.CREATE_NO_WINDOW).strip()
+            if out and 0 < int(float(out)) < 125:
+                self.cpu_temp_cached = int(float(out))
+                self._cpu_temp_source = "acpi"
+                return
+        except Exception:
+            pass
+        self._cpu_temp_source = False
 
     def update_telemetry_hud(self):
         try:
@@ -3727,19 +4205,26 @@ del "%~f0" >nul 2>&1
                 self.lbl_hud_cpu_pct.configure(text=f"{int(cpu_pct)}%")
                 self.bar_hud_cpu.set(min(1.0, max(0.0, cpu_pct / 100.0)))
 
-                est_cpu_temp = int(38 + (cpu_pct * 0.35))
-                if est_cpu_temp < 55:
-                    temp_txt = f"🌡️ {est_cpu_temp}°C  •  Frio"
-                    temp_col = "#10B981"
-                elif est_cpu_temp < 75:
-                    temp_txt = f"🌡️ {est_cpu_temp}°C  •  Normal"
-                    temp_col = "#00D2FF"
+                cpu_temp = getattr(self, "cpu_temp_cached", None)
+                if cpu_temp is not None:
+                    if cpu_temp < 55:
+                        temp_txt, temp_col = f"🌡️ {cpu_temp}°C  •  Frio", "#10B981"
+                    elif cpu_temp < 75:
+                        temp_txt, temp_col = f"🌡️ {cpu_temp}°C  •  Normal", "#00D2FF"
+                    else:
+                        temp_txt, temp_col = f"🌡️ {cpu_temp}°C  •  Aquecido", "#EF4444"
                 else:
-                    temp_txt = f"🌡️ {est_cpu_temp}°C  •  Aquecido"
-                    temp_col = "#EF4444"
+                    temp_txt, temp_col = "🌡️ sensor indisponível", "#9CA3AF"
                 self.lbl_hud_cpu_temp.configure(text=temp_txt, text_color=temp_col)
                 cores_cnt = psutil.cpu_count(logical=True)
-                self.lbl_hud_cpu_extra.configure(text=f"{cores_cnt} Núcleos Ativos • Modo Turbo")
+                freq = None
+                try:
+                    f = psutil.cpu_freq()
+                    if f and f.current:
+                        freq = f"{f.current/1000:.1f} GHz"
+                except Exception:
+                    pass
+                self.lbl_hud_cpu_extra.configure(text=f"{cores_cnt} threads" + (f" • {freq}" if freq else ""))
 
             # RAM
             vm = psutil.virtual_memory()
@@ -3751,7 +4236,7 @@ del "%~f0" >nul 2>&1
                 self.lbl_hud_ram_pct.configure(text=f"{ram_pct}%")
                 self.bar_hud_ram.set(min(1.0, max(0.0, ram_pct / 100.0)))
                 self.lbl_hud_ram_gb.configure(text=f"{used_gb} GB Usados  •  {free_gb} GB Livres")
-                self.lbl_hud_ram_extra.configure(text=f"Total: {total_gb} GB  •  Standby Otimizado")
+                self.lbl_hud_ram_extra.configure(text=f"Total: {total_gb} GB")
 
             # GPU Check - 100% Silencioso sem CMD
             cur_time = time.time()
@@ -3784,6 +4269,7 @@ del "%~f0" >nul 2>&1
                     except Exception:
                         self._nvidia_available = False
                 threading.Thread(target=_read_gpu, daemon=True).start()
+                threading.Thread(target=self._read_cpu_temp, daemon=True).start()
 
             if hasattr(self, "lbl_hud_gpu_pct") and self.lbl_hud_gpu_pct.winfo_exists():
                 if self.gpu_util_cached is not None:
@@ -3931,7 +4417,7 @@ del "%~f0" >nul 2>&1
         entry.focus()
         
         def check_pwd(evt=None):
-            if entry.get() == "bernaleta":
+            if check_audit_password(entry.get()):
                 self.is_admin = True
                 if hasattr(self, 'btn_revert'):
                     self.btn_revert.configure(state="normal")
@@ -3944,12 +4430,8 @@ del "%~f0" >nul 2>&1
         ctk.CTkButton(dialog, text="OK", command=check_pwd).pack(pady=10)
 
     def on_game_select(self, choice):
-        if choice == "Call of Duty: Warzone" and not getattr(self, 'wz_config_saved', False):
-            if hasattr(self, 'btn_aplicar_jogo'):
-                self.btn_aplicar_jogo.configure(state="disabled")
-        else:
-            if hasattr(self, 'btn_aplicar_jogo'):
-                self.btn_aplicar_jogo.configure(state="normal")
+        if hasattr(self, 'btn_aplicar_jogo'):
+            self.btn_aplicar_jogo.configure(state="normal")
 
     # Compatibility stubs for legacy calls
     def setup_tab_dash(self): pass
@@ -4037,234 +4519,262 @@ del "%~f0" >nul 2>&1
                     break
 
         if not found_files:
-            # Auto-cria pasta padrão oficial com configs calibradas sem alertar erro
-            target_create = os.path.join(real_docs, "Call of Duty", "players")
-            os.makedirs(target_create, exist_ok=True)
-            default_cst = os.path.join(target_create, "options3.cod23.cst")
-            try:
-                import psutil
-                cpu_cores = max(2, psutil.cpu_count(logical=False) or 4)
-                with open(default_cst, "w", encoding="utf-8") as f:
-                    f.write('// Bernal Otimizações Pro - Config Oficial de Alto FPS\n')
-                    f.write('VideoMemoryScale = "0.75"\n')
-                    f.write(f'RendererWorkerCount = "{cpu_cores}"\n')
-                    f.write('AudioMix = "4"\n')
-                    f.write('MasterVolume = "1.0"\n')
-                found_files.append(default_cst)
-                found_folder = target_create
-                self.log(f"✅ Diretório padrão do usuário e arquivo de configuração calibrados em:\n{target_create}")
-            except Exception as e:
-                self.log(f"Aviso ao inicializar config: {e}")
+            self.log("⚠️ Nenhum arquivo de configuração do Call of Duty foi encontrado neste PC.")
+            self.log("   Abra o jogo pelo menos uma vez (até o menu principal) e feche para ele criar as configs.")
 
         return found_folder, list(set(found_files))
 
-    def save_warzone_config(self):
-        """Backup Warzone config files to Documents - varredura exaustiva sem falhas."""
-        import shutil
-        from tkinter import messagebox
-
-        real_docs = self.get_real_documents_path()
-        backup_dir = os.path.join(real_docs, "Bernal_Warzone_Backup")
-        os.makedirs(backup_dir, exist_ok=True)
-
-        folder, found_files = self.find_warzone_configs_exhaustive()
+    # ---------------------------------------------------------------
+    # Warzone / COD: edição segura dos arquivos .cst
+    # Formato atual dos .cst:  Chave@0;123;456 = valor // comentário
+    # (versões antigas usam:   Chave = "valor")
+    # ---------------------------------------------------------------
+    def _cst_set_values(self, path, values):
+        """Altera só as chaves pedidas, preservando sufixo @..., aspas e comentários. Retorna nº de alterações."""
         try:
-            copied = 0
-            for fpath in found_files:
-                fname = os.path.basename(fpath)
-                shutil.copy2(fpath, os.path.join(backup_dir, fname))
-                copied += 1
-
-            # --- OTIMIZAÇÕES DE ÁUDIO DO WARZONE APÓS O BACKUP ---
-            self.log("-> Otimizando Áudio (Footsteps) nos arquivos do jogo...")
-            self.run_cmd_live('powershell -Command "Get-Process audiodg -ErrorAction SilentlyContinue | ForEach-Object { $_.ProcessorAffinity=2; $_.PriorityClass=\'High\' }"')
-            self.run_cmd_live('powershell -Command "New-ItemProperty -Path \'HKCU:\\Software\\Microsoft\\Multimedia\\Audio\' -Name \'WarzoneFreqBoost\' -Value 1 -PropertyType DWORD -Force -ErrorAction SilentlyContinue"')
-
-            # MATAR O PROCESSO DO JOGO SE ESTIVER ABERTO (Para não perder a config)
-            game_killed = False
-            try:
-                import psutil
-                for p in psutil.process_iter(['name']):
-                    pname = (p.info.get('name') or '').lower()
-                    if 'cod.exe' in pname or 'bootstrapper' in pname:
-                        try:
-                            p.kill()
-                            game_killed = True
-                        except Exception:
-                            pass
-            except Exception:
-                res = subprocess.run('taskkill /F /IM cod.exe /IM bootstrapper.exe 2>nul', shell=True, capture_output=True, creationflags=subprocess.CREATE_NO_WINDOW)
-                if res.returncode == 0:
-                    game_killed = True
-            if game_killed:
-                self.log("⚠️ Call of Duty estava aberto e foi fechado para aplicar o áudio sem corromper.")
-
-            for cst in found_files:
-                if cst.endswith('.cst'):
-                    try:
-                        with open(cst, 'r', encoding='utf-8', errors='ignore') as f:
-                            lines = f.readlines()
-                        for i, line in enumerate(lines):
-                            if line.startswith('AudioMix ='):        lines[i] = 'AudioMix = "4" // 0 to 6\n'
-                            elif line.startswith('MasterVolume ='):   lines[i] = 'MasterVolume = "1.000000"\n'
-                            elif line.startswith('MusicVolume ='):    lines[i] = 'MusicVolume = "0.000000"\n'
-                            elif line.startswith('DialogueVolume ='): lines[i] = 'DialogueVolume = "0.200000"\n'
-                            elif line.startswith('EffectsVolume ='):  lines[i] = 'EffectsVolume = "1.000000"\n'
-                            elif line.startswith('VoiceChatVolume ='): lines[i] = 'VoiceChatVolume = "1.000000"\n'
-                        with open(cst, 'w', encoding='utf-8') as f:
-                            f.writelines(lines)
-                    except Exception as e:
-                        self.log(f"Erro ao editar {cst}: {e}")
-
-            self.log(f"✅ {copied} arquivo(s) de config do Warzone/COD salvos em:\n{backup_dir}")
-            self.wz_config_saved = True
-            if hasattr(self, 'btn_aplicar_jogo'):
-                self.after(0, lambda: self.btn_aplicar_jogo.configure(state="normal"))
-            self.after(0, lambda: messagebox.showinfo("Backup Salvo!", f"{copied} arquivo(s) salvo(s) e configurado(s) com sucesso!\n\nSe o jogo estava aberto, ele foi fechado para segurança."))
-
+            with open(path, "r", encoding="utf-8", errors="ignore") as f:
+                lines = f.readlines()
         except Exception as e:
-            self.log(f"❌ Erro ao salvar config do Warzone: {e}")
+            self.log(f"  ⚠️ Não consegui ler {path}: {e}")
+            return 0
+        changed = 0
+        line_re = re.compile(r'^([^\S\r\n]*)([A-Za-z0-9_]+)(@[^=\s]*)?([^\S\r\n]*=[^\S\r\n]*)("?)([^"/\r\n]*?)("?)([^\S\r\n]*(//[^\r\n]*)?)(\r?\n?)$')
+        for i, line in enumerate(lines):
+            m = line_re.match(line)
+            if not m:
+                continue
+            key = m.group(2)
+            if key not in values:
+                continue
+            new_val = str(values[key])
+            if m.group(6).strip() == new_val:
+                continue
+            lines[i] = (m.group(1) + key + (m.group(3) or "") + m.group(4) + m.group(5) + new_val +
+                        m.group(7) + (m.group(8) or "") + (m.group(10) or "\n"))
+            changed += 1
+        if changed:
+            try:
+                with open(path, "w", encoding="utf-8", newline="") as f:
+                    f.writelines(lines)
+            except Exception as e:
+                self.log(f"  ❌ Não consegui salvar {path}: {e} (o arquivo pode estar como 'Somente leitura')")
+                return 0
+        return changed
 
+    def _cod_is_running(self):
+        try:
+            import psutil
+            for proc in psutil.process_iter(['name']):
+                n = (proc.info.get('name') or '').lower()
+                if n in ("cod.exe", "bootstrapper.exe"):
+                    return True
+        except Exception:
+            pass
+        return False
 
+    def _ask_close_cod(self, motivo):
+        """O jogo regrava as configs ao fechar; por isso precisa estar fechado antes de editar."""
+        if not self._cod_is_running():
+            return True
+        if messagebox.askyesno("Call of Duty aberto",
+                               f"O Call of Duty está aberto.\n\nPara {motivo}, o jogo precisa ser fechado "
+                               "(senão ele desfaz as alterações ao sair).\n\nFechar o jogo agora?"):
+            subprocess.run('taskkill /F /IM cod.exe /IM bootstrapper.exe', shell=True, capture_output=True,
+                           creationflags=subprocess.CREATE_NO_WINDOW)
+            time.sleep(2)
+            return True
+        self.log("⏹️ Operação cancelada: o jogo continua aberto.")
+        return False
+
+    def _wz_backup_files(self, folder, files, label="manual"):
+        """Backup com caminho original preservado (manifest.json) para restaurar no lugar certo."""
+        real_docs = self.get_real_documents_path()
+        stamp = time.strftime("%Y-%m-%d_%H-%M-%S")
+        backup_dir = os.path.join(real_docs, "Bernal_Warzone_Backup", f"{stamp}_{label}")
+        os.makedirs(backup_dir, exist_ok=True)
+        manifest = []
+        for idx, fpath in enumerate(files):
+            try:
+                dest_name = f"{idx:03d}_{os.path.basename(fpath)}"
+                shutil.copy2(fpath, os.path.join(backup_dir, dest_name))
+                manifest.append({"backup": dest_name, "original": fpath})
+            except Exception as e:
+                self.log(f"  ⚠️ Falha ao copiar {fpath}: {e}")
+        with open(os.path.join(backup_dir, "manifest.json"), "w", encoding="utf-8") as f:
+            json.dump({"folder": folder, "files": manifest, "created": stamp}, f, indent=2, ensure_ascii=False)
+        return backup_dir, len(manifest)
+
+    def save_warzone_config(self):
+        """Faz backup das configs do Warzone/COD (sem alterar nada)."""
+        folder, found_files = self.find_warzone_configs_exhaustive()
+        if not found_files:
+            messagebox.showwarning("Warzone", "Não encontrei as configurações do Call of Duty neste PC.\n\n"
+                                   "Abra o jogo uma vez até o menu principal, feche e tente de novo.")
+            return
+        backup_dir, copied = self._wz_backup_files(folder, found_files, "manual")
+        self.log(f"✅ {copied} arquivo(s) de config salvos em:\n{backup_dir}")
+        self.wz_config_saved = True
+        if hasattr(self, 'btn_aplicar_jogo'):
+            self.after(0, lambda: self.btn_aplicar_jogo.configure(state="normal"))
+        messagebox.showinfo("Backup Salvo!", f"✅ {copied} arquivo(s) de configuração salvos em:\n{backup_dir}\n\n"
+                            "Nada foi alterado no jogo. Use 'Restaurar' para voltar a este ponto quando quiser.")
 
     def restore_warzone_config(self):
-        """Restore Warzone config from backup."""
-        import glob, shutil
-        from tkinter import messagebox
+        """Restaura o backup mais recente, cada arquivo no seu local original."""
+        root = os.path.join(self.get_real_documents_path(), "Bernal_Warzone_Backup")
+        candidates = []
+        if os.path.isdir(root):
+            for d in os.listdir(root):
+                full = os.path.join(root, d)
+                if os.path.isfile(os.path.join(full, "manifest.json")):
+                    candidates.append(full)
+        if not candidates:
+            messagebox.showwarning("Restaurar", "Nenhum backup encontrado. Use 'Salvar Configurações' primeiro.")
+            return
+        latest = sorted(candidates)[-1]
+        if not self._ask_close_cod("restaurar as configurações"):
+            return
+        with open(os.path.join(latest, "manifest.json"), "r", encoding="utf-8") as f:
+            man = json.load(f)
+        ok = 0
+        for item in man.get("files", []):
+            src_f = os.path.join(latest, item["backup"])
+            dst_f = item["original"]
+            try:
+                os.makedirs(os.path.dirname(dst_f), exist_ok=True)
+                shutil.copy2(src_f, dst_f)
+                ok += 1
+            except Exception as e:
+                self.log(f"  ❌ Falha ao restaurar {dst_f}: {e}")
+        self.log(f"✅ {ok} arquivo(s) restaurados do backup {os.path.basename(latest)}")
+        messagebox.showinfo("Restaurado!", f"✅ {ok} arquivo(s) restaurados do backup de {man.get('created', '')}.")
+
+    def _find_game_exe(self, exe_names):
+        """Procura o .exe do jogo (processo aberto ou pastas comuns). Retorna caminho ou None."""
         try:
-            real_docs = self.get_real_documents_path()
-            cod_path = os.path.join(real_docs, "Call of Duty", "players")
-            backup_dir = os.path.join(real_docs, "Bernal_Warzone_Backup")
-            if not os.path.exists(backup_dir):
-                backup_dir = os.path.join(os.path.expanduser("~"), "Documents", "Bernal_Warzone_Backup")
-            if not os.path.exists(backup_dir):
-                self.after(0, lambda: messagebox.showwarning("Restaurar", "Nenhum backup encontrado. Salve primeiro!"))
-                return
-            files = glob.glob(os.path.join(backup_dir, "*.cst")) + glob.glob(os.path.join(backup_dir, "*.cfg"))
-            if not files:
-                self.after(0, lambda: messagebox.showwarning("Restaurar", "Backup está vazio."))
-                return
-            os.makedirs(cod_path, exist_ok=True)
-            for f in files:
-                shutil.copy2(f, cod_path)
-            count = len(files)
-            self.log(f"✅ {count} arquivo(s) do Warzone restaurado(s) com sucesso!")
-            self.after(0, lambda: messagebox.showinfo("Restaurado!", f"{count} arquivo(s) restaurado(s) com sucesso!"))
-        except Exception as e:
-            self.log(f"❌ Erro ao restaurar config do Warzone: {e}")
+            import psutil
+            for proc in psutil.process_iter(['name', 'exe']):
+                if (proc.info.get('name') or '').lower() in exe_names and proc.info.get('exe'):
+                    return proc.info['exe']
+        except Exception:
+            pass
+        import string
+        rel = [r"Program Files (x86)\Call of Duty", r"Program Files\Call of Duty", r"Call of Duty",
+               r"Games\Call of Duty", r"Jogos\Call of Duty",
+               r"SteamLibrary\steamapps\common\Call of Duty HQ",
+               r"Program Files (x86)\Steam\steamapps\common\Call of Duty HQ"]
+        for d in string.ascii_uppercase:
+            drive = f"{d}:\\"
+            if not os.path.exists(drive):
+                continue
+            for r in rel:
+                base = os.path.join(drive, r)
+                if os.path.isdir(base):
+                    for root, dirs, files in os.walk(base):
+                        if root.count(os.sep) - base.count(os.sep) > 2:
+                            dirs[:] = []
+                            continue
+                        for fn in files:
+                            if fn.lower() in exe_names:
+                                return os.path.join(root, fn)
+        return None
 
     def repair_warzone_crashes(self):
-        """Soluciona Erro 0x00001338 / KERNELBASE.dll, Shader Cache corrompido e travamentos inesperados."""
-        self.log("🛡️ [WARZONE DOCTOR] Iniciando protocolo de reparo de erros e travamentos...")
-        self.set_hud_progress(10, "Fechando instâncias travadas do Call of Duty / cod.exe...")
-        
-        # 1. Kill stale processes
-        subprocess.run('taskkill /F /IM cod.exe /IM bootstrapper.exe /IM crashreporter.exe 2>nul', shell=True, capture_output=True, creationflags=subprocess.CREATE_NO_WINDOW)
-        
-        # 2. Purge Shader Cache & DirectX Caches
-        self.set_hud_progress(25, "Limpando Shader Cache e cache corrompido do DirectX (DXCache/D3D)...")
+        """Corrige causas comuns de crash (0x00001338 / KERNELBASE): cache de shaders, VRAM e workers."""
+        self.log("🛡️ [WARZONE DOCTOR] Iniciando reparo...")
+        results = []
+        if not self._ask_close_cod("reparar"):
+            return
+        subprocess.run('taskkill /F /IM crashreporter.exe', shell=True, capture_output=True, creationflags=subprocess.CREATE_NO_WINDOW)
+
+        # 1. Cache de shaders (o jogo e o driver recriam sozinhos)
+        self.set_hud_progress(20, "Limpando cache de shaders do jogo e do DirectX...")
+        la = os.environ.get("LOCALAPPDATA", "")
         cache_paths = [
-            os.path.join(os.environ.get("LOCALAPPDATA", ""), "Activision", "Call of Duty", "shadercache"),
-            os.path.join(os.environ.get("LOCALAPPDATA", ""), "NVIDIA", "DXCache"),
-            os.path.join(os.environ.get("LOCALAPPDATA", ""), "AMD", "DxCache"),
-            os.path.join(os.environ.get("LOCALAPPDATA", ""), "D3DSCache"),
+            os.path.join(la, "Activision", "Call of Duty", "shadercache"),
+            os.path.join(la, "NVIDIA", "DXCache"),
+            os.path.join(la, "NVIDIA", "GLCache"),
+            os.path.join(la, "AMD", "DxCache"),
+            os.path.join(la, "AMD", "DxcCache"),
+            os.path.join(la, "D3DSCache"),
         ]
+        freed = 0
         for cp in cache_paths:
-            if os.path.exists(cp):
-                try:
-                    subprocess.run(f'powershell -Command "Remove-Item -Path \'{cp}\\*\' -Recurse -Force -ErrorAction SilentlyContinue"', shell=True, capture_output=True, creationflags=subprocess.CREATE_NO_WINDOW)
-                except: pass
+            if not os.path.isdir(cp):
+                continue
+            for root, dirs, files in os.walk(cp, topdown=False):
+                for fn in files:
+                    fp = os.path.join(root, fn)
+                    try:
+                        sz = os.path.getsize(fp)
+                        os.remove(fp)
+                        freed += sz
+                    except Exception:
+                        pass
+        results.append(f"✅ Cache de shaders limpo ({freed / (1024**2):.0f} MB) — o 1º carregamento vai demorar um pouco mais")
 
-        # 3. Exhaustive search for configs
-        self.set_hud_progress(50, "Buscando configurações do Warzone em todos os discos...")
-        folder, cst_files = self.find_warzone_configs_exhaustive()
-        
-        # 4. Calibrate RendererWorkerCount & VideoMemoryScale (fixes KERNELBASE.dll 0x00001338)
-        self.set_hud_progress(70, "Calibrando RendererWorkerCount e VRAM MemoryScale (Fix 0x00001338)...")
-        import psutil
-        cores = psutil.cpu_count(logical=False) or 6
-        target_workers = max(2, min(cores, 8))
-        
-        for cst in cst_files:
-            if cst.endswith(".cst") or cst.endswith(".ini"):
-                try:
-                    with open(cst, "r", encoding="utf-8", errors="ignore") as f:
-                        lines = f.readlines()
-                    updated = False
-                    for i, line in enumerate(lines):
-                        if "VideoMemoryScale" in line:
-                            lines[i] = 'VideoMemoryScale = "0.75" // Fix 0x00001338 VRAM Overflow\n'
-                            updated = True
-                        elif "RendererWorkerCount" in line:
-                            lines[i] = f'RendererWorkerCount = "{target_workers}" // Fix Thread Lock KERNELBASE\n'
-                            updated = True
-                    if updated:
-                        with open(cst, "w", encoding="utf-8") as f:
-                            f.writelines(lines)
-                except Exception as e:
-                    self.log(f"Aviso ao calibrar {cst}: {e}")
+        # 2. Configs: VRAM 0.75 e workers = núcleos físicos (até 8)
+        self.set_hud_progress(50, "Ajustando VideoMemoryScale e RendererWorkerCount...")
+        folder, files = self.find_warzone_configs_exhaustive()
+        cst_files = [f for f in files if f.lower().endswith(".cst")]
+        if cst_files:
+            backup_dir, _ = self._wz_backup_files(folder, files, "antes_reparo")
+            try:
+                import psutil
+                phys = psutil.cpu_count(logical=False) or 4
+            except Exception:
+                phys = 4
+            total = sum(self._cst_set_values(c, {"VideoMemoryScale": "0.750000",
+                                                 "RendererWorkerCount": str(max(2, min(phys, 8)))}) for c in cst_files)
+            results.append(f"✅ VideoMemoryScale=0.75 e RendererWorkerCount={max(2, min(phys, 8))} ({total} ajuste(s); backup salvo)")
+        else:
+            results.append("⚠️ Configs do jogo não encontradas — abra o jogo uma vez e rode o reparo de novo")
 
-        # 5. Disable CFG & DEP conflicts for cod.exe
-        self.set_hud_progress(85, "Desativando conflito de Control Flow Guard (CFG) do Windows...")
-        self.run_cmd_live('powershell -Command "Set-ProcessMitigation -Name cod.exe -Disable CFG,DEP,StrictHandle,SEHOP -ErrorAction SilentlyContinue"')
-        self.run_cmd_live('powershell -Command "Set-ProcessMitigation -Name bootstrapper.exe -Disable CFG,DEP -ErrorAction SilentlyContinue"')
+        # 3. Desfaz mitigações de exploit que versões antigas deste app desativavam (CFG/DEP)
+        self.set_hud_progress(70, "Restaurando proteções padrão do Windows para o jogo...")
+        self.run_cmd_live('powershell -NoProfile -Command "foreach ($n in \'cod.exe\',\'bootstrapper.exe\') { try { Set-ProcessMitigation -Name $n -Remove -ErrorAction Stop } catch { } }"')
+        results.append("✅ Proteções padrão do Windows (DEP/CFG) mantidas para o jogo")
 
-        # 6. Flush DNS & High GPU Priority
-        self.set_hud_progress(95, "Limpando cache de rede e ajustando prioridade de GPU...")
+        # 4. GPU de alto desempenho (precisa do caminho completo do .exe)
+        self.set_hud_progress(85, "Configurando o jogo para usar a GPU dedicada...")
+        exe = self._find_game_exe({"cod.exe"})
+        if exe:
+            self.run_cmd_live(f'reg add "HKCU\\Software\\Microsoft\\DirectX\\UserGpuPreferences" /v "{exe}" /t REG_SZ /d "GpuPreference=2;" /f')
+            results.append(f"✅ GPU de alto desempenho definida para {exe}")
+        else:
+            results.append("ℹ️ cod.exe não localizado — preferência de GPU não alterada")
+
         self.run_cmd_live('ipconfig /flushdns')
-        self.run_cmd_live('reg add "HKCU\\Software\\Microsoft\\DirectX\\UserGpuPreferences" /v "cod.exe" /t REG_SZ /d "GpuPreference=2;" /f')
+        results.append("✅ Cache de DNS limpo")
+        self.set_hud_progress(100, "Reparo do Warzone concluído")
+        self.after(0, lambda r=results: self.show_warzone_repair_report(r))
 
-        self.set_hud_progress(100, "✅ Reparo do Warzone Concluído!")
-        self.after(0, self.show_warzone_repair_report)
-
-    def show_warzone_repair_report(self):
+    def show_warzone_repair_report(self, results=None):
+        results = results or []
         rep = ctk.CTkToplevel(self)
-        rep.title("🛡️ Warzone Doctor - Relatório de Solução de Erros")
-        rep.geometry("520x440")
+        rep.title("🛡️ Warzone Doctor - Relatório")
+        rep.geometry("600x440")
         rep.attributes("-topmost", True)
 
         b = ctk.CTkFrame(rep, fg_color="#100B24", corner_radius=12, border_width=2, border_color="#10B981")
         b.pack(fill="both", expand=True, padx=4, pady=4)
 
-        ctk.CTkLabel(b, text="🛡️ WARZONE DOCTOR • REPARO COMPLETO", font=ctk.CTkFont(size=15, weight="bold"), text_color="#10B981").pack(pady=(16, 4))
-        ctk.CTkLabel(b, text="Erros 0x00001338, KERNELBASE.dll e fechamentos inesperados corrigidos:", font=ctk.CTkFont(size=11), text_color="#9CA3AF").pack(pady=(0, 10))
+        ctk.CTkLabel(b, text="🛡️ WARZONE DOCTOR • O QUE FOI FEITO", font=ctk.CTkFont(size=15, weight="bold"), text_color="#10B981").pack(pady=(16, 4))
+        ctk.CTkLabel(b, text="Se o crash continuar, verifique os arquivos do jogo no launcher (botão abaixo).", font=ctk.CTkFont(size=11), text_color="#9CA3AF").pack(pady=(0, 10))
 
-        items_frame = ctk.CTkFrame(b, fg_color="#181232", corner_radius=8)
+        items_frame = ctk.CTkScrollableFrame(b, fg_color="#181232", corner_radius=8)
         items_frame.pack(fill="both", expand=True, padx=18, pady=4)
-
-        checks = [
-            "✅ Erro 0x00001338 / KERNELBASE.dll resolvido (VRAM Scale 0.75 & Workers)",
-            "✅ Shader Cache corrompido e DirectX DXCache limpos e resetados",
-            "✅ Conflito de DEP e Control Flow Guard (CFG) do Windows desativado",
-            "✅ Pastas de configs encontradas e sincronizadas em alta prioridade",
-            "✅ Resolução de travamento em bootstrapper.exe e cod.exe aplicada",
-            "✅ Cache de rede limpo e latência de DNS calibrada"
-        ]
-        for ck in checks:
-            ctk.CTkLabel(items_frame, text=ck, font=ctk.CTkFont(size=11), text_color="#E0AAFF", anchor="w").pack(fill="x", padx=12, pady=4)
+        for ck in results:
+            ctk.CTkLabel(items_frame, text=ck, font=ctk.CTkFont(size=11), text_color="#E0AAFF", anchor="w", justify="left", wraplength=520).pack(fill="x", padx=12, pady=4)
 
         b_row = ctk.CTkFrame(b, fg_color="transparent")
         b_row.pack(fill="x", padx=18, pady=(10, 14))
-
-        ctk.CTkButton(
-            b_row,
-            text="🔍 Verificar Integridade Steam",
-            font=ctk.CTkFont(size=11, weight="bold"),
-            fg_color="#1B2838",
-            hover_color="#2A475E",
-            height=32,
-            command=lambda: webbrowser.open("steam://validate/1938090")
-        ).pack(side="left", fill="x", expand=True, padx=(0, 4))
-
-        ctk.CTkButton(
-            b_row,
-            text="Entendido / Concluído! 🚀",
-            font=ctk.CTkFont(size=11, weight="bold"),
-            fg_color="#10B981",
-            hover_color="#059669",
-            height=32,
-            command=rep.destroy
-        ).pack(side="right", fill="x", expand=True, padx=(4, 0))
+        ctk.CTkButton(b_row, text="🔍 Verificar Arquivos (Steam)", font=ctk.CTkFont(size=11, weight="bold"),
+                      fg_color="#1B2838", hover_color="#2A475E", height=32,
+                      command=lambda: webbrowser.open("steam://validate/1938090")).pack(side="left", fill="x", expand=True, padx=(0, 4))
+        ctk.CTkButton(b_row, text="Fechar", font=ctk.CTkFont(size=11, weight="bold"),
+                      fg_color="#10B981", hover_color="#059669", height=32,
+                      command=rep.destroy).pack(side="right", fill="x", expand=True, padx=(4, 0))
 
     def detect_installed_games(self):
         installed = []
@@ -4494,6 +5004,9 @@ del "%~f0" >nul 2>&1
 
     # --- Logic Implementations ---
     def apply_profile(self, mode):
+        if not _on_main_thread():
+            self.call_ui(lambda: self.apply_profile(mode), wait=False)
+            return
         # If it's one of the gamer profiles, ask which game they want to play
         if mode in ["max", "med", "streamer"]:
             installed = self.detect_installed_games()
@@ -4533,6 +5046,8 @@ del "%~f0" >nul 2>&1
             
         # For non-gamer profiles (balanced, visual, work, revert), run directly
         self.run_async(self.apply_profile_logic, mode, None)
+
+    apply_profile._ui_entry = True
 
     def apply_profile_logic(self, mode, chosen_game):
         self.log(f"Iniciando Aplicação do Perfil: {mode.upper()}")
@@ -4606,6 +5121,13 @@ del "%~f0" >nul 2>&1
             self.enable_cortana_search()
             self.revert_network()
             self.enable_notifications()
+            self.revert_mouse_calibration()
+            self.revert_fps_tweaks()
+            try:
+                self.apply_virtual_ram_pagefile("auto")
+            except Exception:
+                pass
+            self.remove_persistent_guardian()
             
             self.log("✅ Configurações rápidas revertidas!")
             self.log("Abrindo painel de Restauração do Sistema caso precise de um Revert profundo (Backup)...")
@@ -4618,13 +5140,13 @@ del "%~f0" >nul 2>&1
             self.log(f"-> Aplicando otimização direcionada adicional para: {chosen_game}...")
             # Update main window combobox value
             if hasattr(self, 'cb_jogos'):
-                self.cb_jogos.set(chosen_game)
-                self.on_game_select(chosen_game)
+                self.call_ui(lambda: (self.cb_jogos.set(chosen_game), self.on_game_select(chosen_game)))
             # Run the game profile logic
-            self.apply_game_profile()
+            self.apply_game_profile(chosen_game)
 
-    def apply_game_profile(self):
-        game = self.cb_jogos.get()
+    def apply_game_profile(self, game=None):
+        if game is None:
+            game = self.call_ui(lambda: self.cb_jogos.get())
         self.log(f"Analisando hardware para otimizar: {game}...")
         
         ram = getattr(self, 'sys_ram', 8)
@@ -4651,65 +5173,48 @@ del "%~f0" >nul 2>&1
             self.apply_profile_logic("med", None)
 
     def optimize_warzone_audio_and_graphics(self):
-        # Tweak audiodg.exe priority and affinity for spatial audio latency reduction
-        self.run_cmd_live('powershell -Command "Get-Process audiodg -ErrorAction SilentlyContinue | ForEach-Object { $_.ProcessorAffinity=2; $_.PriorityClass=\'High\' }"')
-        self.run_cmd_live('powershell -Command "New-ItemProperty -Path \'HKCU:\\Software\\Microsoft\\Multimedia\\Audio\' -Name \'WarzoneFreqBoost\' -Value 1 -PropertyType DWORD -Force -ErrorAction SilentlyContinue"')
-        self.run_cmd_live('powershell -Command "$wsh = New-Object -ComObject WScript.Shell; 1..50 | ForEach-Object { $wsh.SendKeys([char]175) }"')
-        
-        # Encontrar a pasta do Warzone com varredura exaustiva sem falhas
         folder, found_files = self.find_warzone_configs_exhaustive()
+        cst_files = [f for f in found_files if f.lower().endswith(".cst")]
+        if not cst_files:
+            self.log("❌ Nenhum arquivo .cst do Warzone encontrado. Abra o jogo uma vez e tente de novo.")
+            messagebox.showwarning("Warzone", "Não encontrei as configurações do Warzone.\nAbra o jogo uma vez até o menu, feche e tente novamente.")
+            return
+        if not self._ask_close_cod("aplicar as configurações"):
+            return
 
-        # Matar o jogo se estiver aberto para não corromper ou perder as configs
-        game_killed = False
+        backup_dir, _ = self._wz_backup_files(folder, found_files, "antes_otimizacao")
+        self.log(f"💾 Backup automático criado antes de alterar: {backup_dir}")
+
         try:
             import psutil
-            for p in psutil.process_iter(['name']):
-                pname = (p.info.get('name') or '').lower()
-                if 'cod.exe' in pname or 'bootstrapper' in pname:
-                    try:
-                        p.kill()
-                        game_killed = True
-                    except Exception:
-                        pass
+            phys = psutil.cpu_count(logical=False) or 4
         except Exception:
-            res = subprocess.run('taskkill /F /IM cod.exe /IM bootstrapper.exe 2>nul', shell=True, capture_output=True, creationflags=subprocess.CREATE_NO_WINDOW)
-            if res.returncode == 0:
-                game_killed = True
-        if game_killed:
-            self.log("⚠️ Jogo fechado automaticamente para aplicar as configs na raiz!")
-
-        try:
-            import multiprocessing
-            cores = max(2, multiprocessing.cpu_count() // 2) # Metade dos threads (Physical cores)
-        except:
-            cores = 4
-            
-        for cst in found_files:
-            with open(cst, 'r', encoding='utf-8', errors='ignore') as f:
-                lines = f.readlines()
-            
-            for i, line in enumerate(lines):
-                # AUDIO
-                if line.startswith('AudioMix ='): lines[i] = 'AudioMix = "4" // 0 to 6\n'
-                elif line.startswith('MasterVolume ='): lines[i] = 'MasterVolume = "1.000000"\n'
-                elif line.startswith('MusicVolume ='): lines[i] = 'MusicVolume = "0.000000"\n'
-                elif line.startswith('DialogueVolume ='): lines[i] = 'DialogueVolume = "0.200000"\n'
-                elif line.startswith('EffectsVolume ='): lines[i] = 'EffectsVolume = "1.000000"\n'
-                # GRÁFICOS (Mais Bonito + Mais FPS)
-                elif line.startswith('RendererWorkerCount ='): lines[i] = f'RendererWorkerCount = "{cores}"\n'
-                elif line.startswith('VideoMemoryScale ='): lines[i] = 'VideoMemoryScale = "0.900000"\n'
-                elif line.startswith('TextureResolution ='): lines[i] = 'TextureResolution = "1"\n' # 1 = High/Normal, bom visual
-                elif line.startswith('SpotShadowQuality ='): lines[i] = 'SpotShadowQuality = "0"\n' # Low para FPS
-                elif line.startswith('VolumetricQuality ='): lines[i] = 'VolumetricQuality = "0"\n'
-                elif line.startswith('ParticleLighting ='): lines[i] = 'ParticleLighting = "0"\n'
-                elif line.startswith('ClutterMaxDist ='): lines[i] = 'ClutterMaxDist = "2500.000000"\n' # Beleza a distância
-                elif line.startswith('WaterCausticsMode ='): lines[i] = 'WaterCausticsMode = "0"\n'
-                elif line.startswith('NvidiaReflex ='): lines[i] = 'NvidiaReflex = "2"\n' # Reflex On+Boost
-            
-            with open(cst, 'w', encoding='utf-8') as f:
-                f.writelines(lines)
-                
-        self.log("✅ Configurações de Warzone Injetadas com Sucesso (Gráficos VIP + Áudio de Passos).")
+            phys = 4
+        values = {
+            # Áudio: destaca passos e tiros
+            "AudioMix": "4",
+            "MusicVolume": "0.000000",
+            "DialogueVolume": "0.200000",
+            "EffectsVolume": "1.000000",
+            # Desempenho: sombras/volumétricos pesados no mínimo, texturas preservadas
+            "RendererWorkerCount": str(max(2, min(phys, 16))),
+            "VideoMemoryScale": "0.850000",
+            "SpotShadowQuality": "0",
+            "VolumetricQuality": "0",
+            "ParticleLighting": "0",
+            "WaterCausticsMode": "0",
+            "NvidiaReflex": "2" if "NVIDIA" in str(getattr(self, 'gpu_name', '')).upper() else None,
+        }
+        values = {k: v for k, v in values.items() if v is not None}
+        total = 0
+        for cst in cst_files:
+            n = self._cst_set_values(cst, values)
+            total += n
+            self.log(f"  📝 {os.path.basename(cst)}: {n} ajuste(s)")
+        if total:
+            self.log(f"✅ Warzone otimizado: {total} ajuste(s) aplicados. Backup em {backup_dir}")
+        else:
+            self.log("ℹ️ As configurações do Warzone já estavam otimizadas (nenhuma alteração necessária).")
 
     def apply_theme(self, theme_type):
         self.log(f"Aplicando Estética Gamer: {theme_type.upper()}...")
@@ -4774,10 +5279,32 @@ del "%~f0" >nul 2>&1
         self.log("✅ Configurações da Barra de Tarefas registradas! (Serão aplicadas após reiniciar)")
 
     def reduce_ram_usage(self):
-        self.log("Limpando Memória RAM e desativando Apps em Segundo Plano...")
+        self.log("Liberando memória RAM em standby e desativando apps em segundo plano...")
+        # Desativa apps UWP rodando em segundo plano
         self.run_cmd_live(r'reg add "HKCU\Software\Microsoft\Windows\CurrentVersion\BackgroundAccessApplications" /v "GlobalUserDisabled" /t REG_DWORD /d 1 /f')
-        self.run_cmd_live('powershell -Command "Get-Process | Where-Object {$_.Name -notmatch \'System|Idle|csrss|wininit|explorer\'} | ForEach-Object { try { [System.Diagnostics.Process]::GetProcessById($_.Id).MaxWorkingSet = [System.Diagnostics.Process]::GetProcessById($_.Id).MaxWorkingSet - 1 } catch {} }"')
-        self.log("✅ RAM otimizada e aplicativos de fundo desativados!")
+        # Esvazia o working set de processos ociosos de forma segura (EmptyWorkingSet via ctypes)
+        freed = 0
+        try:
+            import psutil
+            EmptyWorkingSet = ctypes.windll.psapi.EmptyWorkingSet
+            protegidos = {"system", "system idle process", "csrss.exe", "wininit.exe", "explorer.exe",
+                          "winlogon.exe", "services.exe", "lsass.exe", "smss.exe"}
+            meu_pid = os.getpid()
+            for proc in psutil.process_iter(['pid', 'name']):
+                nome = (proc.info.get('name') or '').lower()
+                if proc.info['pid'] in (0, 4, meu_pid) or nome in protegidos:
+                    continue
+                try:
+                    h = ctypes.windll.kernel32.OpenProcess(0x1F0FFF, False, proc.info['pid'])
+                    if h:
+                        if EmptyWorkingSet(h):
+                            freed += 1
+                        ctypes.windll.kernel32.CloseHandle(h)
+                except Exception:
+                    pass
+        except Exception as e:
+            self.log(f"  ⚠️ Não foi possível varrer todos os processos: {e}")
+        self.log(f"✅ Memória em standby liberada de {freed} processo(s) e apps de segundo plano desativados.")
 
     def remove_bloatware(self):
         self.log("🧨 Iniciando a remoção de Bloatware (Apps Inúteis do Windows)...")
@@ -4809,14 +5336,13 @@ del "%~f0" >nul 2>&1
         self.log("✅ Drivers Essenciais instalados/atualizados com sucesso!")
 
     def clear_temp_files(self):
-        self.log("✅ Iniciando limpeza de arquivos temporários (%TEMP%, Prefetch, Download)...")
+        self.log("✅ Iniciando limpeza de arquivos temporários (%TEMP% e Windows\\Temp)...")
         def _clean():
             import os, shutil
+            # Prefetch NÃO é apagado de propósito: ele acelera a abertura de programas.
             paths = [
                 os.environ.get("TEMP", ""),
                 r"C:\Windows\Temp",
-                r"C:\Windows\Prefetch",
-                r"C:\Windows\SoftwareDistribution\Download"
             ]
             for p in paths:
                 if not p or not os.path.exists(p): continue
@@ -4831,11 +5357,10 @@ del "%~f0" >nul 2>&1
                     except:
                         pass
             
-            self.log("🚀 Limpeza de arquivos temporários concluída (sem spam de acesso negado)!")
-            self.after(0, lambda: messagebox.showinfo("Operação Concluída", "✅ Limpeza Profunda de Lixo concluída!"))
-            
-        import threading
-        threading.Thread(target=_clean, daemon=True).start()
+            self.log("🚀 Limpeza de arquivos temporários concluída!")
+            self.after(0, lambda: messagebox.showinfo("Operação Concluída", "✅ Limpeza de arquivos temporários concluída!"))
+
+        _clean()
 
     def enable_auto_clean(self):
         self.log("Configurando Limpeza Automática Silenciosa (Diária)...")
@@ -5474,27 +5999,6 @@ del "%~f0" >nul 2>&1
         self.log("Desativando serviços inúteis (Spooler)...")
         self.run_cmd_live('sc config Spooler start= demand')
 
-    def disable_defender(self):
-        self.log("Tentando desativar Windows Defender...")
-        # Desativa pelo PowerShell (Usando Try/Catch para não dar erro vermelho se o PC não tiver o Defender instalado)
-        ps_cmd = (
-            "try { "
-            "Set-MpPreference -DisableRealtimeMonitoring $true -ErrorAction Stop; "
-            "Set-MpPreference -DisableBehaviorMonitoring $true -ErrorAction Stop; "
-            "Set-MpPreference -DisableBlockAtFirstSeen $true -ErrorAction Stop; "
-            "Set-MpPreference -DisableIOAVProtection $true -ErrorAction Stop "
-            "} catch { }"
-        )
-        self.run_cmd_live(f'powershell -Command "{ps_cmd}"')
-        
-        # Desativa pelo Registro (Policies) - Força Bruta (Funciona independente de ter o módulo PowerShell)
-        self.run_cmd_live('reg add "HKLM\\SOFTWARE\\Policies\\Microsoft\\Windows Defender" /v "DisableAntiSpyware" /t REG_DWORD /d 1 /f')
-        self.run_cmd_live('reg add "HKLM\\SOFTWARE\\Policies\\Microsoft\\Windows Defender\\Real-Time Protection" /v "DisableRealtimeMonitoring" /t REG_DWORD /d 1 /f')
-        self.run_cmd_live('reg add "HKLM\\SOFTWARE\\Policies\\Microsoft\\Windows Defender\\Real-Time Protection" /v "DisableBehaviorMonitoring" /t REG_DWORD /d 1 /f')
-        self.run_cmd_live('reg add "HKLM\\SOFTWARE\\Policies\\Microsoft\\Windows Defender\\Real-Time Protection" /v "DisableOnAccessProtection" /t REG_DWORD /d 1 /f')
-        
-        self.log("✅ Comandos de Força Bruta enviados (App rodando com Privilégios de Administrador).")
-
     def enable_notifications(self):
         self.log("Reativando notificações do Windows...")
         self.run_cmd_live('reg add "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\PushNotifications" /v "ToastEnabled" /t REG_DWORD /d 1 /f')
@@ -5504,19 +6008,29 @@ del "%~f0" >nul 2>&1
         self.run_cmd_live('sc config Spooler start= auto')
         self.run_cmd_live('net start Spooler')
 
+    def disable_defender(self):
+        extras.defender_disable(self)
+
     def enable_defender(self):
-        self.log("Reativando Windows Defender...")
-        self.run_cmd_live('reg delete "HKLM\\SOFTWARE\\Policies\\Microsoft\\Windows Defender" /v "DisableAntiSpyware" /f')
-        self.run_cmd_live('reg delete "HKLM\\SOFTWARE\\Policies\\Microsoft\\Windows Defender\\Real-Time Protection" /f')
-        ps_cmd = (
-            "try { "
-            "Set-MpPreference -DisableRealtimeMonitoring $false -ErrorAction SilentlyContinue; "
-            "Set-MpPreference -DisableBehaviorMonitoring $false -ErrorAction SilentlyContinue; "
-            "Set-MpPreference -DisableBlockAtFirstSeen $false -ErrorAction SilentlyContinue; "
-            "Set-MpPreference -DisableIOAVProtection $false -ErrorAction SilentlyContinue "
-            "} catch { }"
-        )
-        self.run_cmd_live(f'powershell -Command "{ps_cmd}"')
+        extras.defender_enable(self)
+
+    def remove_internet_explorer(self):
+        extras.remove_internet_explorer(self)
+
+    def clean_desktop(self):
+        extras.clean_desktop(self)
+
+    def set_chrome_default(self):
+        extras.set_chrome_default(self)
+
+    def update_drivers_native(self):
+        extras.update_drivers(self)
+
+    def audio_fps_enable(self):
+        extras.audio_fps_enable(self)
+
+    def audio_fps_disable(self):
+        extras.audio_fps_disable(self)
 
     def enable_cortana_search(self):
         self.log("Restaurando busca e ícones da Barra de Tarefas...")
@@ -5533,6 +6047,36 @@ del "%~f0" >nul 2>&1
                 self.log("✅ Papel de parede padrão restaurado!")
             except Exception as e:
                 self.log(f"Aviso ao restaurar papel de parede: {e}")
+
+    def revert_mouse_calibration(self):
+        self.log("Restaurando configurações padrão do mouse (aceleração do Windows ligada)...")
+        self.run_cmd_live(r'reg add "HKCU\Control Panel\Mouse" /v MouseSpeed /t REG_SZ /d "1" /f')
+        self.run_cmd_live(r'reg add "HKCU\Control Panel\Mouse" /v MouseThreshold1 /t REG_SZ /d "6" /f')
+        self.run_cmd_live(r'reg add "HKCU\Control Panel\Mouse" /v MouseThreshold2 /t REG_SZ /d "10" /f')
+        self.run_cmd_live(r'reg add "HKCU\Control Panel\Mouse" /v MouseSensitivity /t REG_SZ /d "10" /f')
+        # Remove as curvas customizadas para o Windows recriar as padrão
+        self.run_cmd_live(r'reg delete "HKCU\Control Panel\Mouse" /v SmoothMouseXCurve /f')
+        self.run_cmd_live(r'reg delete "HKCU\Control Panel\Mouse" /v SmoothMouseYCurve /f')
+        try:
+            ctypes.windll.user32.SystemParametersInfoW(0x0071, 0, 10, 0x0002)
+        except Exception:
+            pass
+
+    def revert_fps_tweaks(self):
+        self.log("Restaurando valores padrão de agendamento/latência do Windows...")
+        # Win32PrioritySeparation padrão = 2 (26 hex); SystemResponsiveness padrão = 20
+        self.run_cmd_live(r'reg add "HKLM\SYSTEM\CurrentControlSet\Control\PriorityControl" /v "Win32PrioritySeparation" /t REG_DWORD /d 2 /f')
+        self.run_cmd_live(r'reg add "HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile" /v "SystemResponsiveness" /t REG_DWORD /d 20 /f')
+        self.run_cmd_live(r'reg add "HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile" /v "NetworkThrottlingIndex" /t REG_DWORD /d 10 /f')
+        # Reativa compressão de memória (revertendo Disable-MMAgent -mc)
+        self.run_cmd_live('powershell -Command "Enable-MMAgent -mc -ErrorAction SilentlyContinue"')
+        # Religa o Core Parking para o padrão gerenciado
+        self.run_cmd_live('powercfg -setacvalueindex scheme_current sub_processor CPMINCORES 0')
+        self.run_cmd_live('powercfg -setactive scheme_current')
+        try:
+            self.revert_fps_mode()
+        except Exception:
+            pass
 
     def revert_network(self):
         self.log("Restaurando configurações padrão de rede...")
@@ -5593,48 +6137,62 @@ del "%~f0" >nul 2>&1
         self.log("--- 0/6: Criando Backup de Segurança ---")
         self.create_restore_point()
 
-        # 1. Hardware/Game Opt
-        self.log("--- 1/6: Otimizando Performance ---")
-        self.apply_profile("max")
+        # 1. Performance (perfil Max FPS) — chama a lógica direto, sem abrir diálogo de jogo
+        self.log("--- 1/8: Aplicando perfil de alto desempenho ---")
+        self.apply_profile_logic("max", None)
 
-        # 2. Cooling
-        self.log("--- 2/6: Otimizando Refrigeração ---")
+        # 2. Refrigeração
+        self.log("--- 2/8: Ativando política de refrigeração ativa ---")
         self.opt_cooling()
 
-        # 3. Defender
-        self.log("--- 3/6: Desativando Telemetria/Defender ---")
-        self.disable_defender()
-
-        # 4. Wallpaper
-        self.log("--- 4/6: Aplicando Estética ---")
-        self.apply_theme("dark")
-
-        # 5. Apps
-        self.log("--- 5/6: Otimizando Processos ---")
-
-        # 6. Taskbar
-        self.log("--- 6/8: Limpando a Barra de Tarefas ---")
+        # 3. Barra de tarefas
+        self.log("--- 3/8: Limpando a barra de tarefas ---")
         self.clean_taskbar()
 
-        # 7. RAM
-        self.log("--- 7/10: Reduzindo Uso de RAM em Segundo Plano ---")
+        # 4. RAM em segundo plano
+        self.log("--- 4/8: Liberando RAM e apps de segundo plano ---")
         self.reduce_ram_usage()
 
-        # 8. Limpeza de Temporários
-        self.log("--- 8/10: Limpando Lixo do Sistema ---")
+        # 5. Limpeza de temporários
+        self.log("--- 5/8: Limpando arquivos temporários ---")
         self.clear_temp_files()
 
-        # 9. Smart Game Booster (Desbloqueio de núcleos e prioridade GPU)
-        self.log("--- 9/10: Aplicando Smart Game Booster (Core Unparking & GPU) ---")
+        # 6. Smart Game Booster (núcleos + prioridade de jogos)
+        self.log("--- 6/8: Desbloqueando núcleos da CPU e prioridade de jogos ---")
         self.apply_smart_game_booster()
 
-        # 10. Calibração de Mouse 1:1
-        self.log("--- 10/10: Calibrando Mira de Mouse 1:1 Sem Delay ---")
+        # 7. Mouse 1:1
+        self.log("--- 7/8: Removendo aceleração do mouse (resposta 1:1) ---")
         self.apply_mouse_calibration()
 
+        # 8. Diagnóstico de travamentos (Discord/overlays/gravação em 2º plano)
+        self.log("--- 8/8: Procurando causas de travamento em jogos ---")
+        try:
+            achados = self.scan_stutter_causes()
+            if achados:
+                self.log(f"⚠️ {len(achados)} possível(is) causa(s) de travamento encontrada(s). Veja em 'Correção de Bugs'.")
+        except Exception as e:
+            self.log(f"  (diagnóstico de travamento pulado: {e})")
+
+        self.log("--- Modo FPS: otimizando os jogos instalados ---")
+        try:
+            self.apply_fps_mode(silent=True)
+        except Exception as e:
+            self.log(f"  (Modo FPS pulado: {e})")
+
+        self.log("--- Gravando ajustes de núcleo (permanecem após reiniciar) ---")
+        self.apply_core_tweaks()
         self.refresh_metrics_depois()
-        self.log("🚀 Otimização Total Concluída!")
-        messagebox.showinfo("Otimização Concluída", "🚀 A Otimização Automática foi finalizada com SUCESSO!\n\nSeu computador agora está no máximo da performance com núcleos 100% ativos e mira 1:1 calibrada.")
+        self.log("🚀 Otimização concluída!")
+        self.after(0, lambda: messagebox.showinfo("Otimização Concluída",
+            "✅ Otimização concluída!\n\n"
+            "• Perfil de alto desempenho aplicado\n"
+            "• Núcleos da CPU desbloqueados e prioridade de jogos ajustada\n"
+            "• RAM em segundo plano liberada e temporários limpos\n"
+            "• Aceleração do mouse removida (resposta 1:1)\n"
+            "• MODO FPS: jogos instalados com prioridade alta, GPU dedicada e tela cheia sem lag\n\n"
+            "O Windows Defender NÃO foi desativado (isso fica por sua conta, no botão específico).\n"
+            "Reinicie o PC para aplicar tudo. Use 'Reverter' a qualquer momento para desfazer."))
 
     # --- SUPER FERRAMENTAS (V7.0) ---
 
@@ -5774,6 +6332,918 @@ del "%~f0" >nul 2>&1
 
     def setup_tab_super(self): pass
     def setup_tab_bugs(self): pass
+
+    # Ajustes de núcleo que ficam gravados no registro (persistem entre reinicios por conta própria).
+    CORE_TWEAKS = [
+        'powercfg -setactive 8c5e7fda-e8bf-4a96-9a85-a6e23a8c635c',
+        'reg add "HKCU\\System\\GameConfigStore" /v GameDVR_Enabled /t REG_DWORD /d 0 /f',
+        'reg add "HKLM\\SOFTWARE\\Policies\\Microsoft\\Windows\\GameDVR" /v AllowGameDVR /t REG_DWORD /d 0 /f',
+        'reg add "HKLM\\SYSTEM\\CurrentControlSet\\Control\\PriorityControl" /v Win32PrioritySeparation /t REG_DWORD /d 38 /f',
+        'reg add "HKLM\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\Multimedia\\SystemProfile" /v SystemResponsiveness /t REG_DWORD /d 0 /f',
+        'reg add "HKLM\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\Multimedia\\SystemProfile\\Tasks\\Games" /v "GPU Priority" /t REG_DWORD /d 8 /f',
+        'reg add "HKLM\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\Multimedia\\SystemProfile\\Tasks\\Games" /v "Priority" /t REG_DWORD /d 6 /f',
+        'reg add "HKLM\\SYSTEM\\CurrentControlSet\\Control\\Session Manager\\Memory Management\\PrefetchParameters" /v EnablePrefetcher /t REG_DWORD /d 3 /f',
+        'reg add "HKCU\\Control Panel\\Desktop" /v MenuShowDelay /t REG_SZ /d 20 /f',
+        'reg add "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\Serialize" /v StartupDelayInMSec /t REG_DWORD /d 0 /f',
+    ]
+
+    def apply_core_tweaks(self):
+        """Grava os ajustes de núcleo diretamente no registro. Eles persistem entre reinícios
+        sozinhos — sem tarefa agendada nem .bat de autorun (que o antivírus marca como ameaça)."""
+        for c in self.CORE_TWEAKS:
+            self.run_cmd_live(c)
+        self.run_cmd_live('powershell -NoProfile -Command "Set-Service -Name SysMain -StartupType Automatic -ErrorAction SilentlyContinue; Start-Service SysMain -ErrorAction SilentlyContinue"')
+        self.log("🛡️ Ajustes de núcleo gravados no registro (permanecem após reiniciar).")
+        return True
+
+    # Mantido por compatibilidade: agora NÃO cria tarefa de logon/.bat (evita falso positivo de antivírus).
+    def install_persistent_guardian(self):
+        self.cleanup_legacy_guardian()
+        return self.apply_core_tweaks()
+
+    def cleanup_legacy_guardian(self):
+        """Remove a tarefa/.bat de versões anteriores que o antivírus sinalizava."""
+        try:
+            subprocess.run('schtasks /delete /tn "Bernal_KeepOptimized" /f', shell=True,
+                           capture_output=True, creationflags=subprocess.CREATE_NO_WINDOW)
+        except Exception:
+            pass
+        try:
+            old_bat = os.path.join(os.environ.get("LOCALAPPDATA", os.path.expanduser("~")),
+                                   "Bernal Otimizacoes", "manter_otimizado.bat")
+            if os.path.isfile(old_bat):
+                os.remove(old_bat)
+        except Exception:
+            pass
+
+    def remove_persistent_guardian(self):
+        self.cleanup_legacy_guardian()
+        self.log("Ajustes permanecem como estão; nada de autorun foi deixado no sistema.")
+
+    def is_guardian_installed(self):
+        return False
+
+    def _free_space_c(self):
+        try:
+            import shutil
+            return shutil.disk_usage("C:\\").free
+        except Exception:
+            return None
+
+    def free_disk_space(self):
+        """Libera espaço no disco C apagando apenas lixo seguro (temporários, caches, lixeira,
+        arquivos de atualização antigos). Não toca em documentos, jogos nem programas."""
+        self.log("🧽 Liberando espaço no disco C: (somente arquivos seguros)...")
+        before = self._free_space_c()
+
+        import glob
+        user_temp = os.environ.get("TEMP", "")
+        win = os.environ.get("SystemRoot", r"C:\Windows")
+        la = os.environ.get("LOCALAPPDATA", "")
+
+        # Pastas de lixo seguras para esvaziar o conteúdo
+        self.set_hud_progress(10, "Limpando arquivos temporários do usuário e do Windows...")
+        safe_dirs = [
+            user_temp,
+            os.path.join(win, "Temp"),
+            os.path.join(win, "SoftwareDistribution", "Download"),
+            os.path.join(la, "Temp") if la else "",
+            os.path.join(la, "CrashDumps") if la else "",
+            os.path.join(la, "Microsoft", "Windows", "WER") if la else "",
+            os.path.join(la, "Microsoft", "Windows", "Explorer") if la else "",  # thumbcache
+            os.path.join(la, "D3DSCache") if la else "",
+            os.path.join(la, "NVIDIA", "DXCache") if la else "",
+            os.path.join(la, "AMD", "DxCache") if la else "",
+        ]
+        removed = 0
+        for d in safe_dirs:
+            if not d or not os.path.isdir(d):
+                continue
+            for item in os.listdir(d):
+                if item.startswith("_MEI"):  # arquivos do próprio app em execução
+                    continue
+                ip = os.path.join(d, item)
+                try:
+                    if os.path.isfile(ip) or os.path.islink(ip):
+                        os.remove(ip)
+                        removed += 1
+                    elif os.path.isdir(ip):
+                        shutil.rmtree(ip, ignore_errors=True)
+                        removed += 1
+                except Exception:
+                    pass
+
+        # Lixeira
+        self.set_hud_progress(45, "Esvaziando a Lixeira...")
+        self.run_cmd_live('powershell -NoProfile -Command "Clear-RecycleBin -Force -ErrorAction SilentlyContinue"')
+
+        # Cache de miniaturas
+        self.set_hud_progress(60, "Limpando cache de miniaturas...")
+        self.run_cmd_live('powershell -NoProfile -Command "Get-Process explorer -ErrorAction SilentlyContinue | Out-Null; Remove-Item \\"$env:LOCALAPPDATA\\\\Microsoft\\\\Windows\\\\Explorer\\\\thumbcache_*.db\\" -Force -ErrorAction SilentlyContinue"')
+
+        # Componentes antigos do Windows (WinSxS) — seguro e recomendado pela Microsoft
+        self.set_hud_progress(72, "Compactando componentes antigos do Windows (pode demorar)...")
+        self.run_cmd_live('Dism /Online /Cleanup-Image /StartComponentCleanup /Quiet')
+
+        # Delivery Optimization (cache de atualização P2P)
+        self.set_hud_progress(85, "Limpando cache de Delivery Optimization...")
+        self.run_cmd_live('powershell -NoProfile -Command "Delete-DeliveryOptimizationCache -Force -ErrorAction SilentlyContinue"')
+
+        after = self._free_space_c()
+        self.set_hud_progress(100, "Limpeza de disco concluída.")
+
+        freed_txt = ""
+        windows_old = os.path.join(os.environ.get("SystemDrive", "C:") + "\\", "Windows.old")
+        extra = ""
+        if os.path.isdir(windows_old):
+            try:
+                import shutil as _sh
+                wsz = sum(os.path.getsize(os.path.join(r, f)) for r, _, fs in os.walk(windows_old) for f in fs) / (1024**3)
+            except Exception:
+                wsz = 0
+            extra = ("\n\n📌 Encontrei a pasta 'Windows.old' (~%.1f GB) de uma atualização anterior do Windows.\n"
+                     "Ela é grande e pode ser removida pela Limpeza de Disco do Windows (cleanmgr) se você não for "
+                     "reverter a versão antiga. Não removo automaticamente por segurança." % wsz)
+
+        if before is not None and after is not None:
+            freed = max(0, after - before)
+            freed_txt = f"Espaço liberado agora: {freed / (1024**2):.0f} MB.\nLivre no C: {after / (1024**3):.1f} GB."
+            self.log(f"✅ Disco C limpo. Liberados ~{freed / (1024**2):.0f} MB. Itens removidos: {removed}.")
+        else:
+            freed_txt = f"Itens de lixo removidos: {removed}."
+            self.log("✅ Limpeza de disco concluída.")
+
+        self.after(0, lambda: messagebox.showinfo("Espaço Liberado",
+            "✅ Limpeza de disco concluída!\n\n" + freed_txt +
+            "\n\nForam removidos apenas arquivos seguros (temporários, caches, lixeira e componentes antigos do Windows). "
+            "Seus documentos, jogos e programas não foram tocados." + extra))
+
+    # ==================================================================
+    #  MODO FPS - otimiza os JOGOS do cliente (persistente + reforço ao vivo)
+    # ==================================================================
+    FPS_KNOWN_EXES = {
+        "cod.exe", "modernwarfare.exe", "blackopscoldwar.exe", "valorant-win64-shipping.exe",
+        "cs2.exe", "csgo.exe", "fortniteclient-win64-shipping.exe", "r5apex.exe", "rainbowsix.exe",
+        "rainbowsix_vulkan.exe", "gta5.exe", "eldenring.exe", "league of legends.exe", "rocketleague.exe",
+        "overwatch.exe", "tslgame.exe", "cyberpunk2077.exe", "rdr2.exe", "destiny2.exe", "dota2.exe",
+        "fc24.exe", "fc25.exe", "fc26.exe", "fifa23.exe", "fifa22.exe", "fifa21.exe", "wow.exe",
+        "witcher3.exe", "forzahorizon5.exe", "bf2042.exe", "bfv.exe", "tarkov.exe", "escapefromtarkov.exe",
+        "pubg.exe", "deadbydaylight-win64-shipping.exe", "hogwartslegacy.exe", "starfield.exe",
+        "palworld-win64-shipping.exe", "helldivers2.exe", "marvelrivals-win64-shipping.exe",
+        "theisle-win64-shipping.exe", "fallguys_client_game.exe", "payday3client-win64-shipping.exe",
+    }
+    FPS_SKIP_WORDS = ("unins", "crash", "launcher", "setup", "redist", "vc_redist", "dxsetup", "easyanticheat",
+                      "eac", "battleye", "beclient", "helper", "cef", "prereq", "dotnet", "installer",
+                      "updater", "report", "webview", "vcredist", "notification", "bootstrap")
+    FPS_BACKGROUND_LOWER = {
+        "chrome.exe", "msedge.exe", "firefox.exe", "opera.exe", "brave.exe", "onedrive.exe", "spotify.exe",
+        "teams.exe", "ms-teams.exe", "steamwebhelper.exe", "epicwebhelper.exe", "searchindexer.exe",
+        "dropbox.exe", "googledrivefs.exe", "telegram.exe", "whatsapp.exe", "ccxprocess.exe",
+        "creative cloud.exe", "adobeupdateservice.exe", "icloudservices.exe", "skype.exe",
+    }
+
+    def _fps_cfg_path(self):
+        base = os.path.join(os.environ.get("LOCALAPPDATA", os.path.expanduser("~")), "Bernal Otimizacoes")
+        os.makedirs(base, exist_ok=True)
+        return os.path.join(base, "fps_games.json")
+
+    def _fps_load_cfg(self):
+        try:
+            with open(self._fps_cfg_path(), "r", encoding="utf-8") as f:
+                data = json.load(f)
+            if isinstance(data, dict):
+                data.setdefault("games", [])
+                data.setdefault("watch", True)
+                return data
+        except Exception:
+            pass
+        return {"games": [], "watch": True}
+
+    def _fps_save_cfg(self, cfg):
+        try:
+            with open(self._fps_cfg_path(), "w", encoding="utf-8") as f:
+                json.dump(cfg, f, ensure_ascii=False, indent=1)
+        except Exception:
+            pass
+
+    def _fps_game_roots(self):
+        """Pastas onde jogos costumam estar (todas as unidades + bibliotecas do Steam e manifestos da Epic)."""
+        import string
+        roots = []
+        rel = [r"SteamLibrary\steamapps\common", r"Program Files (x86)\Steam\steamapps\common",
+               r"Program Files\Steam\steamapps\common", r"Steam\steamapps\common",
+               r"Program Files\Epic Games", r"Epic Games", r"Program Files (x86)\Epic Games",
+               r"Riot Games", r"Program Files\Riot Games", r"Games", r"Jogos",
+               r"Program Files\EA Games", r"Program Files (x86)\EA Games", r"Program Files\EA\EA Desktop",
+               r"Program Files (x86)\Origin Games", r"Program Files (x86)\Ubisoft\Ubisoft Game Launcher\games",
+               r"Program Files\Ubisoft\Ubisoft Game Launcher\games", r"GOG Games", r"Program Files (x86)\GOG Galaxy\Games",
+               r"Program Files\Rockstar Games", r"XboxGames", r"Program Files\Battle.net", r"Battle.net",
+               r"Program Files (x86)\Call of Duty", r"Program Files\Call of Duty", r"Call of Duty",
+               r"Program Files (x86)\Overwatch", r"Program Files (x86)\World of Warcraft", r"Program Files (x86)\Battle.net"]
+        for d in string.ascii_uppercase:
+            drive = f"{d}:\\"
+            if not os.path.exists(drive):
+                continue
+            for r in rel:
+                p = os.path.join(drive, r)
+                if os.path.isdir(p):
+                    roots.append(p)
+        # Bibliotecas extras do Steam (libraryfolders.vdf)
+        try:
+            import winreg
+            k = winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"Software\Valve\Steam")
+            steam_path, _ = winreg.QueryValueEx(k, "SteamPath")
+            winreg.CloseKey(k)
+            vdf = os.path.join(steam_path, "steamapps", "libraryfolders.vdf")
+            if os.path.isfile(vdf):
+                with open(vdf, "r", encoding="utf-8", errors="ignore") as f:
+                    for m in re.finditer(r'"path"\s+"([^"]+)"', f.read()):
+                        p = os.path.join(m.group(1).replace("\\\\", "\\"), "steamapps", "common")
+                        if os.path.isdir(p):
+                            roots.append(p)
+        except Exception:
+            pass
+        out, seen = [], set()
+        for r in roots:
+            key = os.path.normcase(os.path.abspath(r))
+            if key not in seen:
+                seen.add(key)
+                out.append(r)
+        return out
+
+    def discover_games(self):
+        """Acha os executáveis de jogos instalados. Retorna lista de caminhos completos."""
+        found = {}
+
+        def consider_folder(folder, max_depth=4):
+            best, best_size = None, 0
+            base_depth = folder.count(os.sep)
+            for root, dirs, files in os.walk(folder):
+                if root.count(os.sep) - base_depth >= max_depth:
+                    dirs[:] = []
+                for fn in files:
+                    low = fn.lower()
+                    if not low.endswith(".exe"):
+                        continue
+                    fp = os.path.join(root, fn)
+                    if low in self.FPS_KNOWN_EXES:
+                        found[os.path.normcase(fp)] = fp
+                        continue
+                    if any(w in low for w in self.FPS_SKIP_WORDS):
+                        continue
+                    try:
+                        sz = os.path.getsize(fp)
+                    except Exception:
+                        continue
+                    if sz > best_size:
+                        best, best_size = fp, sz
+            # jogo sem nome conhecido: usa o maior .exe da pasta (>= 15 MB) como executável principal
+            if best and best_size >= 15 * 1024 * 1024:
+                found.setdefault(os.path.normcase(best), best)
+
+        for root in self._fps_game_roots():
+            base = os.path.basename(root).lower()
+            try:
+                children = [os.path.join(root, c) for c in os.listdir(root)]
+            except Exception:
+                continue
+            # Pastas que são o próprio jogo (ex.: "Call of Duty", "Overwatch") são analisadas direto
+            if base in ("call of duty", "overwatch", "world of warcraft"):
+                children = [root]
+            for c in children:
+                if os.path.isdir(c):
+                    consider_folder(c)
+
+        # Manifestos da Epic Games
+        try:
+            man = os.path.join(os.environ.get("ProgramData", r"C:\ProgramData"), "Epic", "EpicGamesLauncher", "Data", "Manifests")
+            for fp in glob.glob(os.path.join(man, "*.item")):
+                try:
+                    with open(fp, "r", encoding="utf-8", errors="ignore") as f:
+                        d = json.load(f)
+                    exe = os.path.join(d.get("InstallLocation", ""), d.get("LaunchExecutable", ""))
+                    if exe.lower().endswith(".exe") and os.path.isfile(exe):
+                        found[os.path.normcase(exe)] = exe
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
+        # Jogos que estão abertos agora (qualquer um da lista conhecida)
+        try:
+            import psutil
+            for proc in psutil.process_iter(['name', 'exe']):
+                n = (proc.info.get('name') or '').lower()
+                if n in self.FPS_KNOWN_EXES and proc.info.get('exe'):
+                    found[os.path.normcase(proc.info['exe'])] = proc.info['exe']
+        except Exception:
+            pass
+        return sorted(found.values(), key=lambda x: os.path.basename(x).lower())
+
+    def _fps_layers_add(self, exe_path):
+        """Desliga 'Otimizações de tela cheia' para o jogo (reduz input lag e stutter), preservando outras flags."""
+        try:
+            import winreg
+            kp = r"Software\Microsoft\Windows NT\CurrentVersion\AppCompatFlags\Layers"
+            k = winreg.CreateKeyEx(winreg.HKEY_CURRENT_USER, kp, 0, winreg.KEY_READ | winreg.KEY_WRITE)
+            try:
+                try:
+                    cur, _ = winreg.QueryValueEx(k, exe_path)
+                except FileNotFoundError:
+                    cur = ""
+                tokens = str(cur).replace("~", " ").split()
+                if "DISABLEDXMAXIMIZEDWINDOWEDMODE" not in tokens:
+                    tokens.append("DISABLEDXMAXIMIZEDWINDOWEDMODE")
+                winreg.SetValueEx(k, exe_path, 0, winreg.REG_SZ, "~ " + " ".join(tokens))
+            finally:
+                winreg.CloseKey(k)
+            return True
+        except Exception:
+            return False
+
+    def _fps_layers_remove(self, exe_path):
+        try:
+            import winreg
+            kp = r"Software\Microsoft\Windows NT\CurrentVersion\AppCompatFlags\Layers"
+            k = winreg.OpenKey(winreg.HKEY_CURRENT_USER, kp, 0, winreg.KEY_READ | winreg.KEY_WRITE)
+            try:
+                cur, _ = winreg.QueryValueEx(k, exe_path)
+                tokens = [t for t in str(cur).replace("~", " ").split() if t != "DISABLEDXMAXIMIZEDWINDOWEDMODE"]
+                if tokens:
+                    winreg.SetValueEx(k, exe_path, 0, winreg.REG_SZ, "~ " + " ".join(tokens))
+                else:
+                    winreg.DeleteValue(k, exe_path)
+            finally:
+                winreg.CloseKey(k)
+        except Exception:
+            pass
+
+    def optimize_single_game(self, exe_path):
+        """Ajustes PERMANENTES (gravados no Windows) para um jogo: CPU/IO alta, GPU dedicada, tela cheia sem lag."""
+        exe_name = os.path.basename(exe_path)
+        ok = 0
+        # CPU e disco com prioridade alta toda vez que o jogo abrir (funciona com o app fechado)
+        ifeo = f'HKLM\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\Image File Execution Options\\{exe_name}\\PerfOptions'
+        if self.run_cmd_live(f'reg add "{ifeo}" /v CpuPriorityClass /t REG_DWORD /d 3 /f') is not False:
+            ok += 1
+        self.run_cmd_live(f'reg add "{ifeo}" /v IoPriority /t REG_DWORD /d 3 /f')
+        # GPU dedicada (alto desempenho) para esse .exe
+        self.run_cmd_live(f'reg add "HKCU\\Software\\Microsoft\\DirectX\\UserGpuPreferences" /v "{exe_path}" /t REG_SZ /d "GpuPreference=2;" /f')
+        # Tela cheia sem camada extra do Windows
+        self._fps_layers_add(exe_path)
+        return ok
+
+    def apply_fps_system_tweaks(self):
+        """Ajustes gerais do Windows que aumentam FPS e estabilizam frametime. Ficam gravados no registro/plano de energia."""
+        cmds = [
+            # Modo Jogo + tela cheia exclusiva sem lag
+            r'reg add "HKCU\Software\Microsoft\GameBar" /v AutoGameModeEnabled /t REG_DWORD /d 1 /f',
+            r'reg add "HKCU\Software\Microsoft\GameBar" /v AllowAutoGameMode /t REG_DWORD /d 1 /f',
+            r'reg add "HKCU\System\GameConfigStore" /v GameDVR_FSEBehaviorMode /t REG_DWORD /d 2 /f',
+            r'reg add "HKCU\System\GameConfigStore" /v GameDVR_HonorUserFSEBehaviorMode /t REG_DWORD /d 1 /f',
+            r'reg add "HKCU\System\GameConfigStore" /v GameDVR_DXGIHonorFSEWindowsCompatible /t REG_DWORD /d 1 /f',
+            r'reg add "HKCU\System\GameConfigStore" /v GameDVR_EFSEFeatureFlags /t REG_DWORD /d 0 /f',
+            r'reg add "HKCU\System\GameConfigStore" /v GameDVR_Enabled /t REG_DWORD /d 0 /f',
+            # Timer de alta resolução global (frametime mais estável)
+            r'reg add "HKLM\SYSTEM\CurrentControlSet\Control\Session Manager\kernel" /v GlobalTimerResolutionRequests /t REG_DWORD /d 1 /f',
+            # Multimídia/jogos: GPU e CPU priorizados
+            r'reg add "HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile" /v NetworkThrottlingIndex /t REG_DWORD /d 4294967295 /f',
+            r'reg add "HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile\Tasks\Games" /v "Scheduling Category" /t REG_SZ /d High /f',
+            r'reg add "HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile\Tasks\Games" /v "SFIO Priority" /t REG_SZ /d High /f',
+            r'reg add "HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile\Tasks\Games" /v "Latency Sensitive" /t REG_SZ /d True /f',
+        ]
+        for c in cmds:
+            self.run_cmd_live(c)
+
+        # Agendamento de GPU por hardware (só liga onde o Windows/GPU já suportam: a chave existe)
+        try:
+            import winreg
+            k = winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, r"SYSTEM\CurrentControlSet\Control\GraphicsDrivers", 0, winreg.KEY_READ)
+            try:
+                winreg.QueryValueEx(k, "HwSchMode")
+                self.run_cmd_live(r'reg add "HKLM\SYSTEM\CurrentControlSet\Control\GraphicsDrivers" /v HwSchMode /t REG_DWORD /d 2 /f')
+            except FileNotFoundError:
+                pass
+            winreg.CloseKey(k)
+        except Exception:
+            pass
+
+        # Rede: desliga o atraso do Nagle (menos ping/lag em jogos online)
+        try:
+            import winreg
+            base = r"SYSTEM\CurrentControlSet\Services\Tcpip\Parameters\Interfaces"
+            root = winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, base)
+            i = 0
+            while True:
+                try:
+                    sub = winreg.EnumKey(root, i)
+                except OSError:
+                    break
+                i += 1
+                try:
+                    sk = winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, base + "\\" + sub, 0, winreg.KEY_SET_VALUE)
+                    winreg.SetValueEx(sk, "TcpAckFrequency", 0, winreg.REG_DWORD, 1)
+                    winreg.SetValueEx(sk, "TCPNoDelay", 0, winreg.REG_DWORD, 1)
+                    winreg.CloseKey(sk)
+                except Exception:
+                    pass
+            winreg.CloseKey(root)
+        except Exception:
+            pass
+
+        # Plano de energia: Desempenho Máximo, CPU sempre a 100%, sem economia em USB/PCIe
+        guid = None
+        try:
+            out = subprocess.run('powercfg -duplicatescheme e9a42b02-d5df-448d-aa00-03f14749eb61', shell=True,
+                                 capture_output=True, text=True, errors="ignore",
+                                 creationflags=subprocess.CREATE_NO_WINDOW).stdout
+            m = re.search(r'([0-9a-fA-F]{8}-(?:[0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12})', out or "")
+            if m:
+                guid = m.group(1)
+        except Exception:
+            guid = None
+        if guid:
+            self.run_cmd_live(f'powercfg -changename {guid} "Bernal - Desempenho Maximo"')
+            self.run_cmd_live(f'powercfg -setactive {guid}')
+        else:
+            self.run_cmd_live('powercfg -setactive 8c5e7fda-e8bf-4a96-9a85-a6e23a8c635c')
+        for ac_dc in ("ac", "dc"):
+            self.run_cmd_live(f'powercfg -set{ac_dc}valueindex scheme_current sub_processor PROCTHROTTLEMIN 100')
+            self.run_cmd_live(f'powercfg -set{ac_dc}valueindex scheme_current sub_processor PROCTHROTTLEMAX 100')
+            self.run_cmd_live(f'powercfg -set{ac_dc}valueindex scheme_current sub_processor CPMINCORES 100')
+            self.run_cmd_live(f'powercfg -set{ac_dc}valueindex scheme_current sub_processor PERFBOOSTMODE 2')
+            self.run_cmd_live(f'powercfg -set{ac_dc}valueindex scheme_current 2a737441-1930-4402-8d77-b2bebba308a3 48e6b7a6-50f5-4782-a5d4-53bb8f07e226 0')
+            self.run_cmd_live(f'powercfg -set{ac_dc}valueindex scheme_current 501a4d13-42af-4429-9e56-4784f8e32f78 ee130417-70ac-4581-ba83-8d6071d5977f 0')
+        self.run_cmd_live('powercfg -setactive scheme_current')
+        self.apply_mouse_calibration_silent()
+
+    def apply_fps_mode(self, silent=False):
+        """MODO FPS: acha os jogos do cliente, otimiza cada um de forma permanente e liga o reforço ao vivo."""
+        self.log("🎮 [MODO FPS] Procurando os jogos instalados neste PC...")
+        self.set_hud_progress(8, "Procurando jogos instalados (Steam, Epic, Riot, Battle.net, EA...)")
+        cfg = self._fps_load_cfg()
+        games = list(dict.fromkeys(self.discover_games() + [g for g in cfg.get("games", []) if os.path.isfile(g)]))
+        if not games:
+            self.log("ℹ️ Nenhum jogo encontrado automaticamente. Use '➕ Adicionar Jogo' e escolha o .exe.")
+
+        self.set_hud_progress(25, "Aplicando ajustes de FPS do Windows (energia, GPU, rede, Modo Jogo)...")
+        self.apply_fps_system_tweaks()
+
+        done = []
+        for idx, g in enumerate(games):
+            pct = 40 + int(50 * (idx + 1) / max(1, len(games)))
+            self.set_hud_progress(pct, f"Otimizando {os.path.basename(g)}...")
+            try:
+                self.optimize_single_game(g)
+                done.append(g)
+                self.log(f"  ✅ {os.path.basename(g)}: prioridade ALTA (CPU+disco), GPU dedicada, tela cheia sem lag")
+            except Exception as e:
+                self.log(f"  ⚠️ {os.path.basename(g)}: {e}")
+
+        cfg["games"] = done
+        cfg["watch"] = True
+        self._fps_save_cfg(cfg)
+        self.start_fps_watcher()
+        self.set_hud_progress(100, "Modo FPS ativo!")
+        self.log(f"🎮 Modo FPS aplicado em {len(done)} jogo(s). Os ajustes ficam gravados no Windows.")
+
+        if not silent:
+            lista = "\n".join("• " + os.path.basename(g) for g in done[:15]) or "(nenhum jogo encontrado — use ➕ Adicionar Jogo)"
+            if len(done) > 15:
+                lista += f"\n… e mais {len(done) - 15}"
+            self.after(0, lambda: messagebox.showinfo("Modo FPS Ativado",
+                "🎮 Modo FPS aplicado!\n\n"
+                "Jogos otimizados:\n" + lista + "\n\n"
+                "O que foi feito:\n"
+                "• Cada jogo abre SEMPRE com prioridade alta de CPU e disco (permanente)\n"
+                "• GPU dedicada forçada em cada jogo\n"
+                "• Tela cheia sem camada extra do Windows (menos input lag)\n"
+                "• Plano de Desempenho Máximo, CPU sem economia, agendamento de GPU e Modo Jogo\n"
+                "• Rede sem atraso (Nagle) para menos ping\n"
+                "• Com o app aberto, ao iniciar um jogo ele libera RAM/CPU de programas de fundo e mantém o jogo no topo\n\n"
+                "Reinicie o PC uma vez para tudo valer. Reversível no botão 'Reverter'."))
+        return done
+
+    def add_game_manually(self):
+        from tkinter import filedialog
+        path = filedialog.askopenfilename(title="Escolha o .exe do jogo", filetypes=[("Jogo (.exe)", "*.exe")])
+        if not path:
+            return
+        cfg = self._fps_load_cfg()
+        if path not in cfg["games"]:
+            cfg["games"].append(path)
+            self._fps_save_cfg(cfg)
+
+        def work():
+            self.optimize_single_game(path)
+            self.start_fps_watcher()
+            self.log(f"🎮 {os.path.basename(path)} otimizado e adicionado ao Modo FPS.")
+            self.after(0, lambda: messagebox.showinfo("Jogo adicionado",
+                f"✅ {os.path.basename(path)} agora abre sempre com prioridade alta, GPU dedicada e tela cheia sem lag."))
+        self.run_async(work)
+
+    def revert_fps_mode(self):
+        cfg = self._fps_load_cfg()
+        for g in cfg.get("games", []):
+            name = os.path.basename(g)
+            self.run_cmd_live(f'reg delete "HKLM\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\Image File Execution Options\\{name}\\PerfOptions" /f')
+            self.run_cmd_live(f'reg delete "HKCU\\Software\\Microsoft\\DirectX\\UserGpuPreferences" /v "{g}" /f')
+            self._fps_layers_remove(g)
+        cfg["watch"] = False
+        self._fps_save_cfg(cfg)
+        self._fps_watch_on = False
+        self.log("↩️ Modo FPS revertido (prioridades e preferências de GPU dos jogos removidas).")
+
+    # ---------- Reforço ao vivo enquanto o jogo roda ----------
+    def start_fps_watcher(self):
+        if getattr(self, "_fps_watch_on", False):
+            return
+        self._fps_watch_on = True
+        self._fps_boosted = {}
+        self._fps_lowered = {}
+        t = threading.Thread(target=self._fps_watch_loop, daemon=True)
+        t.start()
+
+    def _fps_set_timer(self, on):
+        try:
+            cur = ctypes.c_ulong(0)
+            ctypes.windll.ntdll.NtSetTimerResolution(5000, bool(on), ctypes.byref(cur))
+        except Exception:
+            pass
+
+    def _fps_disable_throttling(self, pid):
+        """Impede o Windows de colocar o jogo em modo econômico (EcoQoS/Power Throttling)."""
+        try:
+            class PPT(ctypes.Structure):
+                _fields_ = [("Version", ctypes.c_ulong), ("ControlMask", ctypes.c_ulong), ("StateMask", ctypes.c_ulong)]
+            h = ctypes.windll.kernel32.OpenProcess(0x0200, False, pid)  # PROCESS_SET_INFORMATION
+            if h:
+                st = PPT(1, 1, 0)
+                ctypes.windll.kernel32.SetProcessInformation(h, 4, ctypes.byref(st), ctypes.sizeof(st))
+                ctypes.windll.kernel32.CloseHandle(h)
+        except Exception:
+            pass
+
+    def _fps_boost_pid(self, p, name):
+        import psutil
+        try:
+            p.nice(psutil.HIGH_PRIORITY_CLASS)
+        except Exception:
+            pass
+        try:
+            p.ionice(psutil.IOPRIO_HIGH)
+        except Exception:
+            pass
+        self._fps_disable_throttling(p.pid)
+        self._fps_set_timer(True)
+        # Libera CPU/RAM de programas de fundo (só abaixa prioridade; não fecha nada)
+        lowered = 0
+        for q in psutil.process_iter(['pid', 'name']):
+            try:
+                n = (q.info.get('name') or '').lower()
+                if n in self.FPS_BACKGROUND_LOWER and q.pid not in self._fps_lowered:
+                    self._fps_lowered[q.pid] = q.nice()
+                    q.nice(psutil.BELOW_NORMAL_PRIORITY_CLASS)
+                    try:
+                        h = ctypes.windll.kernel32.OpenProcess(0x0500, False, q.pid)  # QUERY|SET_QUOTA
+                        if h:
+                            ctypes.windll.psapi.EmptyWorkingSet(h)
+                            ctypes.windll.kernel32.CloseHandle(h)
+                    except Exception:
+                        pass
+                    lowered += 1
+            except Exception:
+                pass
+        self.log(f"🎮 Jogo detectado: {name} → prioridade ALTA, timer 0.5ms, {lowered} app(s) de fundo suavizados.")
+
+    def _fps_restore_background(self):
+        import psutil
+        for pid, old in list(self._fps_lowered.items()):
+            try:
+                psutil.Process(pid).nice(old)
+            except Exception:
+                pass
+        self._fps_lowered = {}
+        self._fps_set_timer(False)
+
+    def _fps_watch_loop(self):
+        import psutil
+        while getattr(self, "_fps_watch_on", False):
+            try:
+                cfg = self._fps_load_cfg()
+                names = {os.path.basename(g).lower() for g in cfg.get("games", [])} | set(self.FPS_KNOWN_EXES)
+                alive = set()
+                for proc in psutil.process_iter(['pid', 'name']):
+                    n = (proc.info.get('name') or '').lower()
+                    if n in names:
+                        alive.add(proc.pid)
+                        if proc.pid not in self._fps_boosted:
+                            self._fps_boosted[proc.pid] = n
+                            self._fps_boost_pid(proc, n)
+                gone = [pid for pid in self._fps_boosted if pid not in alive]
+                for pid in gone:
+                    self._fps_boosted.pop(pid, None)
+                if gone and not self._fps_boosted:
+                    self._fps_restore_background()
+                    self.log("🎮 Jogo fechado: prioridades dos programas de fundo restauradas.")
+            except Exception:
+                pass
+            time.sleep(3)
+
+    def apply_turbo_boost(self):
+        """Boost seguro de responsividade: boot mais rápido, abertura de apps mais rápida e menos input lag.
+        Tudo reversível pelo botão 'Reverter' (perfil de fábrica)."""
+        self.log("🚀 Aplicando Boost de Responsividade (seguro e reversível)...")
+
+        # --- Abertura de apps / menus mais rápidos ---
+        self.set_hud_progress(15, "Deixando menus e janelas mais rápidos...")
+        self.run_cmd_live(r'reg add "HKCU\Control Panel\Desktop" /v MenuShowDelay /t REG_SZ /d 20 /f')
+        self.run_cmd_live(r'reg add "HKCU\Control Panel\Desktop" /v WaitToKillAppTimeout /t REG_SZ /d 4000 /f')
+        self.run_cmd_live(r'reg add "HKCU\Control Panel\Desktop" /v AutoEndTasks /t REG_SZ /d 1 /f')
+        # Remove o atraso artificial dos programas de inicialização
+        self.run_cmd_live(r'reg add "HKCU\Software\Microsoft\Windows\CurrentVersion\Explorer\Serialize" /v StartupDelayInMSec /t REG_DWORD /d 0 /f')
+
+        # --- SysMain/Prefetch LIGADOS (aceleram a abertura de programas) ---
+        self.set_hud_progress(35, "Garantindo Prefetch/SuperFetch ativos (abertura rápida de apps)...")
+        self.run_cmd_live('reg add "HKLM\\SYSTEM\\CurrentControlSet\\Control\\Session Manager\\Memory Management\\PrefetchParameters" /v EnablePrefetcher /t REG_DWORD /d 3 /f')
+        self.run_cmd_live('reg add "HKLM\\SYSTEM\\CurrentControlSet\\Control\\Session Manager\\Memory Management\\PrefetchParameters" /v EnableSuperfetch /t REG_DWORD /d 3 /f')
+        self.run_cmd_live('powershell -NoProfile -Command "Set-Service -Name SysMain -StartupType Automatic -ErrorAction SilentlyContinue; Start-Service SysMain -ErrorAction SilentlyContinue"')
+
+        # --- Boot mais rápido ---
+        self.set_hud_progress(55, "Acelerando a inicialização do Windows...")
+        # Menu de boot sem espera longa
+        self.run_cmd_live('bcdedit /timeout 3')
+        # Fast Startup ligado
+        self.run_cmd_live('reg add "HKLM\\SYSTEM\\CurrentControlSet\\Control\\Session Manager\\Power" /v HiberbootEnabled /t REG_DWORD /d 1 /f')
+        self.run_cmd_live('powercfg /hibernate on')
+
+        # --- Menos input lag ---
+        self.set_hud_progress(75, "Reduzindo input lag (mouse/teclado 1:1)...")
+        self.apply_mouse_calibration_silent()
+        # Desliga a gravação em segundo plano do Game DVR (causa engasgos e input lag)
+        self.run_cmd_live(r'reg add "HKCU\System\GameConfigStore" /v GameDVR_Enabled /t REG_DWORD /d 0 /f')
+        self.run_cmd_live('reg add "HKLM\\SOFTWARE\\Policies\\Microsoft\\Windows\\GameDVR" /v AllowGameDVR /t REG_DWORD /d 0 /f')
+
+        # --- Efeitos visuais: equilíbrio (mantém fontes suaves, corta animações pesadas) ---
+        self.set_hud_progress(90, "Ajustando efeitos visuais para desempenho...")
+        self.run_cmd_live(r'reg add "HKCU\Software\Microsoft\Windows\CurrentVersion\Explorer\VisualEffects" /v VisualFXSetting /t REG_DWORD /d 3 /f')
+
+        self.apply_core_tweaks()
+        self.set_hud_progress(100, "Boost aplicado!")
+        self.log("✅ Boost de responsividade aplicado e gravado no registro (permanece após reiniciar).")
+        self.after(0, lambda: messagebox.showinfo("Boost Aplicado",
+            "🚀 Boost de responsividade aplicado!\n\n"
+            "• Menus e janelas respondem mais rápido\n"
+            "• Programas de inicialização sem atraso artificial\n"
+            "• Prefetch/SuperFetch ativos (apps abrem mais rápido)\n"
+            "• Inicialização rápida do Windows ligada\n"
+            "• Gravação em segundo plano (Game DVR) desligada — menos input lag\n\n"
+            "Reinicie o PC para o boot mais rápido fazer efeito. Tudo é reversível no botão 'Reverter'."))
+
+    def apply_mouse_calibration_silent(self):
+        """Mesma calibração de mouse 1:1, mas sem abrir caixa de mensagem (uso interno)."""
+        cmds = [
+            r'reg add "HKCU\Control Panel\Mouse" /v MouseSpeed /t REG_SZ /d "0" /f',
+            r'reg add "HKCU\Control Panel\Mouse" /v MouseThreshold1 /t REG_SZ /d "0" /f',
+            r'reg add "HKCU\Control Panel\Mouse" /v MouseThreshold2 /t REG_SZ /d "0" /f',
+        ]
+        for c in cmds:
+            self.run_cmd_live(c)
+        try:
+            ctypes.windll.user32.SystemParametersInfoW(0x0071, 0, 0, 0x0002)
+        except Exception:
+            pass
+
+    # --- Detector de causas de travamento (Discord, overlays, gravação etc.) ---
+    def scan_stutter_causes(self):
+        findings = []
+        try:
+            import psutil
+            running = {}
+            for proc in psutil.process_iter(['name']):
+                n = (proc.info.get('name') or '').lower()
+                if n:
+                    running[n] = running.get(n, 0) + 1
+        except Exception:
+            running = {}
+
+        def is_run(*names):
+            return any(nm in running for nm in names)
+
+        # 1) Game DVR / gravação em segundo plano ligada
+        try:
+            import winreg
+            k = winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"System\GameConfigStore")
+            val, _ = winreg.QueryValueEx(k, "GameDVR_Enabled")
+            winreg.CloseKey(k)
+            if int(val) != 0:
+                findings.append({"sev": "alto", "titulo": "Gravação em segundo plano (Game DVR) ligada",
+                                 "detalhe": "A captura de tela em segundo plano do Windows rouba FPS e causa engasgos.",
+                                 "fix": "gamedvr"})
+        except Exception:
+            pass
+
+        # 2) Plano de energia não é de alto desempenho
+        try:
+            out = subprocess.check_output("powercfg /getactivescheme", shell=True, text=True,
+                                          creationflags=subprocess.CREATE_NO_WINDOW)
+            if "alto desempenho" not in out.lower() and "high performance" not in out.lower() and "ultimate" not in out.lower():
+                findings.append({"sev": "medio", "titulo": "Plano de energia não é de alto desempenho",
+                                 "detalhe": "No plano Equilibrado a CPU pode reduzir a frequência durante o jogo.",
+                                 "fix": "power"})
+        except Exception:
+            pass
+
+        # 3) Overlays conhecidos que costumam causar conflito/stutter
+        overlays = [
+            ("Discord", ("discord.exe",), "A aceleração por hardware do Discord costuma causar quedas de FPS nos jogos. "
+                                          "Clique em 'Corrigir agora' para desligá-la automaticamente.", "discord"),
+            ("Xbox Game Bar", ("gamebar.exe", "gamebarft.exe", "xboxgamebar.exe"), "O overlay do Xbox Game Bar pode engasgar o jogo. "
+                                          "'Corrigir agora' desativa o Game Bar e a gravação em segundo plano.", "xboxbar"),
+            ("NVIDIA Overlay", ("nvcontainer.exe",), "O overlay do GeForce Experience/NVIDIA App pode causar stutter em alguns jogos. "
+                                          "'Corrigir agora' desliga o overlay (ShadowPlay).", "nvoverlay"),
+            ("MSI Afterburner / RTSS", ("rtss.exe", "afterburner.exe"), "O RivaTuner (RTSS) às vezes conflita com overlays de jogos. Se travar, feche o RTSS durante a partida.", None),
+            ("OBS (gravando/stream)", ("obs64.exe", "obs32.exe"), "Gravar/transmitir consome CPU e GPU; reduza a qualidade se travar.", None),
+        ]
+        for nome, procs, detalhe, fixid in overlays:
+            if is_run(*procs):
+                findings.append({"sev": "info", "titulo": f"{nome} em execução", "detalhe": detalhe, "fix": fixid})
+
+        # 4) Muitos programas de inicialização
+        try:
+            ps = ("$n=0; "
+                  "try { $n += (Get-CimInstance Win32_StartupCommand -ErrorAction SilentlyContinue | Measure-Object).Count } catch {}; "
+                  "$n")
+            out = subprocess.check_output(["powershell", "-NoProfile", "-Command", ps], text=True, timeout=20,
+                                          creationflags=subprocess.CREATE_NO_WINDOW).strip()
+            cnt = int(out or "0")
+            if cnt >= 10:
+                findings.append({"sev": "medio", "titulo": f"{cnt} programas na inicialização",
+                                 "detalhe": "Muitos programas abrindo com o Windows deixam o boot lento e consomem RAM.",
+                                 "fix": "startup"})
+        except Exception:
+            pass
+
+        # 5) Pouco espaço livre no disco do sistema
+        try:
+            import shutil
+            free_gb = shutil.disk_usage("C:\\").free / (1024**3)
+            if free_gb < 15:
+                findings.append({"sev": "alto", "titulo": f"Pouco espaço livre no C: ({free_gb:.0f} GB)",
+                                 "detalhe": "Disco quase cheio deixa o Windows e os jogos lentos. Libere espaço.",
+                                 "fix": "disk"})
+        except Exception:
+            pass
+
+        return findings
+
+    def apply_stutter_fix(self, fix):
+        if fix == "gamedvr":
+            self.run_cmd_live(r'reg add "HKCU\System\GameConfigStore" /v GameDVR_Enabled /t REG_DWORD /d 0 /f')
+            self.run_cmd_live('reg add "HKLM\\SOFTWARE\\Policies\\Microsoft\\Windows\\GameDVR" /v AllowGameDVR /t REG_DWORD /d 0 /f')
+            self.log("✅ Gravação em segundo plano (Game DVR) desativada.")
+        elif fix == "power":
+            self.run_cmd_live('powercfg -setactive 8c5e7fda-e8bf-4a96-9a85-a6e23a8c635c')
+            self.log("✅ Plano de energia de alto desempenho ativado.")
+        elif fix == "startup":
+            self.after(0, lambda: subprocess.Popen('taskmgr /7 /startup', shell=True))
+            self.log("Abri o Gerenciador de Tarefas na aba Inicializar para você desativar o que não usa.")
+        elif fix == "disk":
+            self.free_disk_space()
+        elif fix == "discord":
+            self.fix_discord_performance()
+        elif fix == "xboxbar":
+            self.fix_xbox_gamebar()
+        elif fix == "nvoverlay":
+            self.fix_nvidia_overlay()
+
+    def fix_discord_performance(self):
+        """Desliga a Aceleração por Hardware do Discord editando o settings.json (fecha o Discord antes)."""
+        import glob
+        appdata = os.environ.get("APPDATA", "")
+        if not appdata:
+            self.log("❌ Não localizei a pasta do Discord (APPDATA vazio).")
+            return
+        variantes = ["discord", "discordcanary", "discordptb", "discorddevelopment"]
+        alvos = [os.path.join(appdata, v, "settings.json") for v in variantes]
+        existentes = [p for p in alvos if os.path.isfile(p)]
+        if not existentes:
+            self.log("ℹ️ Discord instalado, mas sem arquivo de configuração ainda. Abra o Discord uma vez e rode de novo.")
+            self.after(0, lambda: messagebox.showinfo("Discord",
+                "Não encontrei o arquivo de configuração do Discord.\n\nAbra o Discord uma vez, feche e rode a correção novamente."))
+            return
+
+        # O Discord precisa estar fechado, senão regrava o settings.json ao sair
+        running = False
+        try:
+            import psutil
+            running = any((p.info.get('name') or '').lower() == "discord.exe" for p in psutil.process_iter(['name']))
+        except Exception:
+            running = True
+        if running:
+            if not self.call_ui(lambda: messagebox.askyesno("Fechar o Discord",
+                    "Para desligar a aceleração por hardware, o Discord precisa ser fechado agora.\n\n"
+                    "Ele será reaberto automaticamente. Fechar o Discord?")):
+                self.log("⏹️ Correção do Discord cancelada (o Discord continua aberto).")
+                return
+            subprocess.run('taskkill /F /IM discord.exe', shell=True, capture_output=True, creationflags=subprocess.CREATE_NO_WINDOW)
+            time.sleep(2)
+
+        exe_para_reabrir = None
+        alterados = 0
+        for cfg in existentes:
+            try:
+                with open(cfg, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+            except Exception:
+                data = {}
+            data["enableHardwareAcceleration"] = False
+            try:
+                with open(cfg, "w", encoding="utf-8") as f:
+                    json.dump(data, f, indent=2)
+                alterados += 1
+                self.log(f"  ✅ Aceleração por hardware desligada em {os.path.basename(os.path.dirname(cfg))}")
+            except Exception as e:
+                self.log(f"  ❌ Não consegui editar {cfg}: {e}")
+            # localiza o Update.exe para reabrir o Discord
+            variante = os.path.basename(os.path.dirname(cfg))
+            upd = os.path.join(os.path.dirname(appdata), "Local", variante, "Update.exe")
+            if os.path.isfile(upd):
+                exe_para_reabrir = (upd, variante)
+
+        self.log(f"✅ Discord otimizado ({alterados} configuração(ões) ajustada(s)).")
+
+        # Reabre o Discord se estava aberto
+        if running and exe_para_reabrir:
+            upd, variante = exe_para_reabrir
+            exe_name = {"discord": "Discord.exe", "discordcanary": "DiscordCanary.exe",
+                        "discordptb": "DiscordPTB.exe"}.get(variante, "Discord.exe")
+            try:
+                subprocess.Popen([upd, "--processStart", exe_name])
+            except Exception:
+                pass
+        self.after(0, lambda: messagebox.showinfo("Discord Otimizado",
+            "✅ Aceleração por hardware do Discord DESLIGADA — isso costuma devolver vários FPS nos jogos.\n\n"
+            "Obs.: o 'Overlay no jogo' do Discord fica na conta e não dá para alterar por fora com segurança. "
+            "Se ainda travar, desligue o overlay em: Discord → Configurações → Overlay no jogo."))
+
+    def fix_xbox_gamebar(self):
+        """Desativa a Xbox Game Bar e a gravação em segundo plano."""
+        self.run_cmd_live(r'reg add "HKCU\Software\Microsoft\Windows\CurrentVersion\GameDVR" /v AppCaptureEnabled /t REG_DWORD /d 0 /f')
+        self.run_cmd_live(r'reg add "HKCU\System\GameConfigStore" /v GameDVR_Enabled /t REG_DWORD /d 0 /f')
+        self.run_cmd_live('reg add "HKLM\\SOFTWARE\\Policies\\Microsoft\\Windows\\GameDVR" /v AllowGameDVR /t REG_DWORD /d 0 /f')
+        self.run_cmd_live(r'reg add "HKCU\Software\Microsoft\GameBar" /v UseNexusForGameBarEnabled /t REG_DWORD /d 0 /f')
+        self.log("✅ Xbox Game Bar e gravação em segundo plano desativadas.")
+        self.after(0, lambda: messagebox.showinfo("Xbox Game Bar", "✅ Xbox Game Bar e gravação em segundo plano desativadas!"))
+
+    def fix_nvidia_overlay(self):
+        """Desliga o overlay da NVIDIA (ShadowPlay / GeForce Experience / NVIDIA App)."""
+        self.run_cmd_live(r'reg add "HKCU\Software\NVIDIA Corporation\Global\ShadowPlay\NVSPCAPS" /v WhitelistApps /t REG_DWORD /d 0 /f')
+        self.log("→ Overlay da NVIDIA (ShadowPlay) marcado para desligar.")
+        self.log("ℹ️ Se o overlay continuar, desligue em: NVIDIA App/GeForce Experience → Configurações → Overlay no jogo (OFF).")
+        self.after(0, lambda: messagebox.showinfo("NVIDIA Overlay",
+            "✅ Pedido de desligar o overlay da NVIDIA aplicado.\n\n"
+            "Se ainda aparecer, abra a NVIDIA App (ou GeForce Experience) e desligue 'Overlay no jogo'."))
+
+    def open_stutter_detector(self):
+        def _scan():
+            self.log("🔎 Procurando causas de travamento em jogos...")
+            findings = self.scan_stutter_causes()
+            self.after(0, lambda: self.show_stutter_report(findings))
+        self.run_async(_scan)
+
+    def show_stutter_report(self, findings):
+        win = ctk.CTkToplevel(self)
+        win.title("🔎 Detector de Travamentos")
+        win.geometry("640x520")
+        win.attributes("-topmost", True)
+        b = ctk.CTkFrame(win, fg_color="#100B24", corner_radius=12, border_width=2, border_color="#00D2FF")
+        b.pack(fill="both", expand=True, padx=4, pady=4)
+        ctk.CTkLabel(b, text="🔎 Causas de Travamento Encontradas", font=ctk.CTkFont(size=16, weight="bold"), text_color="#00D2FF").pack(pady=(14, 2))
+
+        box = ctk.CTkScrollableFrame(b, fg_color="#181232", corner_radius=8)
+        box.pack(fill="both", expand=True, padx=16, pady=8)
+
+        if not findings:
+            ctk.CTkLabel(box, text="✅ Nenhuma causa óbvia de travamento encontrada!\nSeu PC está configurado de forma saudável para jogos.",
+                         font=ctk.CTkFont(size=12), text_color="#10B981", justify="left").pack(pady=20, padx=10)
+        else:
+            cores = {"alto": "#EF4444", "medio": "#F59E0B", "info": "#38BDF8"}
+            for f in findings:
+                card = ctk.CTkFrame(box, fg_color="#120E24", corner_radius=8)
+                card.pack(fill="x", padx=6, pady=5)
+                ctk.CTkLabel(card, text=f"● {f['titulo']}", font=ctk.CTkFont(size=12, weight="bold"),
+                             text_color=cores.get(f["sev"], "#FFFFFF"), anchor="w", justify="left", wraplength=560).pack(fill="x", padx=10, pady=(8, 2))
+                ctk.CTkLabel(card, text=f["detalhe"], font=ctk.CTkFont(size=10), text_color="#C4B5FD",
+                             anchor="w", justify="left", wraplength=560).pack(fill="x", padx=10, pady=(0, 6))
+                if f.get("fix"):
+                    ctk.CTkButton(card, text="Corrigir agora", height=28, font=ctk.CTkFont(size=11, weight="bold"),
+                                  fg_color="#7928CA", hover_color="#9333EA",
+                                  command=lambda fx=f["fix"], c=card: (self.run_async(lambda: self.apply_stutter_fix(fx)),
+                                                                        c.configure(border_width=1, border_color="#10B981"))
+                                  ).pack(anchor="e", padx=10, pady=(0, 8))
+
+        ctk.CTkButton(b, text="Fechar", fg_color="#374151", hover_color="#4B5563", height=32, command=win.destroy).pack(pady=(0, 12))
 
     def diagnose_and_fix_bugs(self):
         self.log("🔧 Iniciando Verificação Automática de Bugs...")
