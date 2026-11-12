@@ -22,7 +22,7 @@ import hashlib
 import hmac
 import queue as _queue_mod
 
-APP_VERSION = "10.9"
+APP_VERSION = "11.0"
 
 # --------------------------------------------------------------------------
 # Senhas: nunca em texto puro no código. Para trocar uma senha, rode:
@@ -1408,9 +1408,9 @@ class OtimizadorApp(ctk.CTk):
             return False                      # nuvem indisponível: cai no GitHub
         chk = cloud.check_update(APP_VERSION)
         if not chk.get("available"):
-            if manual:
-                self.after(0, lambda: messagebox.showinfo("Atualização", f"✅ Você já está na versão mais recente (V{APP_VERSION})."))
-            return True
+            # A nuvem pode estar atrasada (cache de até 5 min ou release só no GitHub):
+            # devolve False para o GitHub também ser consultado.
+            return False
         tag = "V" + str(chk["version"])
         notes = chk.get("notes") or ""
         if not self.call_ui(lambda: messagebox.askyesno(
@@ -2728,8 +2728,8 @@ del "%~f0" >nul 2>&1
                 "category": "futebol",
                 "tag": "⚽ FUTEBOL & FIFA",
                 "tag_color": "#10B981",
-                "name": "Cristiano Ronaldo (CR7 Siuuu)",
-                "sub": "O Lendário Artilheiro sob os Holofotes da Champions League",
+                "name": "Artilheiro Lendário Camisa 7",
+                "sub": "Comemoração Explosiva de Gol sob os Holofotes da Grande Final",
                 "file": "WP_Futebol_CR7.png",
                 "thumb": "thumb_WP_Futebol_CR7.png"
             },
@@ -2738,7 +2738,7 @@ del "%~f0" >nul 2>&1
                 "category": "futebol",
                 "tag": "⚽ FUTEBOL & FIFA",
                 "tag_color": "#10B981",
-                "name": "Lionel Messi (Campeão do Mundo)",
+                "name": "Camisa 10 Campeão do Mundo",
                 "sub": "O Camisa 10 Erguendo a Taça sob Confetes Dourados",
                 "file": "WP_Futebol_Messi.png",
                 "thumb": "thumb_WP_Futebol_Messi.png"
@@ -2874,8 +2874,8 @@ del "%~f0" >nul 2>&1
                 "category": "anime",
                 "tag": "⚔️ ANIME & SETUP",
                 "tag_color": "#A855F7",
-                "name": "Dragon Ball - Goku Instinto Superior",
-                "sub": "Goku Mastered Ultra Instinct com Aura Cósmica Divina",
+                "name": "Guerreiro Lendário - Instinto Divino",
+                "sub": "Lutador Lendário com Aura Prateada Cósmica",
                 "file": "WP_Anime_DragonBall.png",
                 "thumb": "thumb_WP_Anime_DragonBall.png"
             },
@@ -2884,8 +2884,8 @@ del "%~f0" >nul 2>&1
                 "category": "anime",
                 "tag": "⚔️ ANIME & SETUP",
                 "tag_color": "#A855F7",
-                "name": "Dragon Ball - Vegeta Ultra Ego",
-                "sub": "Príncipe Vegeta com Poder Hakai e Chamas Púrpuras",
+                "name": "Príncipe Guerreiro - Ego Destruidor",
+                "sub": "Rival Orgulhoso com Poder de Destruição e Chamas Púrpuras",
                 "file": "WP_Anime_Vegeta.png",
                 "thumb": "thumb_WP_Anime_Vegeta.png"
             },
@@ -2894,8 +2894,8 @@ del "%~f0" >nul 2>&1
                 "category": "anime",
                 "tag": "⚔️ ANIME & SETUP",
                 "tag_color": "#A855F7",
-                "name": "Naruto - Sábio dos Seis Caminhos",
-                "sub": "Naruto Rikudou Sennin com Chakra Dourado e Rasengan",
+                "name": "Ninja da Raposa - Modo Sábio",
+                "sub": "Ninja Lendário com Chakra Dourado e Esfera de Energia",
                 "file": "WP_Anime_Naruto.png",
                 "thumb": "thumb_WP_Anime_Naruto.png"
             },
@@ -2904,8 +2904,8 @@ del "%~f0" >nul 2>&1
                 "category": "anime",
                 "tag": "⚔️ ANIME & SETUP",
                 "tag_color": "#A855F7",
-                "name": "Naruto - Sasuke Susanoo & Chidori",
-                "sub": "Sasuke com Mangekyo, Rinnegan, Chidori e Armadura Susanoo",
+                "name": "Ninja Vingador - Armadura Espiritual",
+                "sub": "Rival Sombrio com Olhos Místicos, Raio na Mão e Guerreiro Espectral",
                 "file": "WP_Anime_Sasuke.png",
                 "thumb": "thumb_WP_Anime_Sasuke.png"
             },

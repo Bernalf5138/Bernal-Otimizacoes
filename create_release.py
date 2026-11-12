@@ -1,4 +1,4 @@
-import os
+﻿import os
 import sys
 import json
 import hashlib
@@ -24,12 +24,9 @@ SETUP_NAME = f"Setup_Bernal_Otimizacoes_V{VERSION}.exe"
 
 # Novidades desta versão (troque a cada release)
 NOTES = """
-- 🎨 **Novos Wallpapers Anime & Futebol 4K:**
-  • Dragon Ball: Goku Instinto Superior & Vegeta Ultra Ego
-  • Naruto: Naruto Modo Sábio dos Seis Caminhos & Sasuke Susanoo/Chidori
-  • Futebol: Cristiano Ronaldo (CR7 Siuuu) & Lionel Messi (Campeão do Mundo)
-- ✨ Marca d'água oficial minimalista 'BERNAL OTIMIZAÇÕES PRO' integrada em todas as artes.
-- 🚀 Otimizações de desempenho e estabilidade geral V10.9.
+- 🔄 **Atualização automática mais confiável:** o app agora confere também o GitHub quando a nuvem ainda não tem a versão nova, então ninguém fica sem o aviso.
+- 🎨 Wallpapers Anime & Futebol 4K com nomes novos: Guerreiro Lendário, Príncipe Guerreiro, Ninja da Raposa, Ninja Vingador, Artilheiro Lendário Camisa 7 e Camisa 10 Campeão do Mundo.
+- 🚀 Ajustes de estabilidade.
 """
 
 FILES = [
