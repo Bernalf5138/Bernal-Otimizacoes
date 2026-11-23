@@ -22,7 +22,7 @@ import hashlib
 import hmac
 import queue as _queue_mod
 
-APP_VERSION = "11.3"
+APP_VERSION = "11.4"
 
 # --------------------------------------------------------------------------
 # Senhas: nunca em texto puro no código. Para trocar uma senha, rode:
@@ -2001,6 +2001,7 @@ del "%~f0" >nul 2>&1
             ("ferramentas", "🛠️  Super Ferramentas"),
             ("sistemas", "🚀  Sistemas AME"),
             ("bugs", "🩹  Correção de Bugs"),
+            ("disco", "💾  Saúde do Disco"),
             ("log", "📜  Log & Auditoria"),
         ]
 
@@ -2046,6 +2047,7 @@ del "%~f0" >nul 2>&1
         self.views["ferramentas"] = self.create_view_ferramentas(self.main_content_container)
         self.views["sistemas"] = self.create_view_sistemas(self.main_content_container)
         self.views["bugs"] = self.create_view_bugs(self.main_content_container)
+        self.views["disco"] = self.create_view_disco(self.main_content_container)
         self.views["log"] = self.create_view_log(self.main_content_container)
 
     def show_view(self, view_name):
@@ -3771,6 +3773,336 @@ del "%~f0" >nul 2>&1
         ctk.CTkButton(c_fmt, text="📊 Ver Progresso do BitLocker (% Ao Vivo em Tempo Real)", fg_color="#2980B9", hover_color="#1F618D", font=ctk.CTkFont(weight="bold"), height=36, command=self.open_bitlocker_monitor).pack(fill="x", padx=14, pady=(3, 12))
 
         return scroll
+
+    # ------------------------------------------------------------------
+    # 💾 Saúde do Disco: só roda quando o cliente clica, e só nos discos marcados.
+    # Não "recupera vida útil" (desgaste é físico): mede a saúde e ajuda o disco a durar mais.
+    # ------------------------------------------------------------------
+    DISK_SCAN_PS = r"""
+[Console]::OutputEncoding = [Text.Encoding]::UTF8
+$ErrorActionPreference = 'SilentlyContinue'
+$vols = @{}
+foreach ($v in Get-Volume) { if ($v.DriveLetter) { $vols[[string]$v.DriveLetter] = $v } }
+$out = @()
+foreach ($d in Get-PhysicalDisk) {
+  $c = $null; try { $c = $d | Get-StorageReliabilityCounter -ErrorAction Stop } catch {}
+  $letras = @()
+  foreach ($p in (Get-Partition -DiskNumber $d.DeviceId)) {
+    if ($p.DriveLetter -and [int][char]$p.DriveLetter -ne 0) {
+      $l = [string]$p.DriveLetter; $v = $vols[$l]
+      $letras += [pscustomobject]@{ L = $l; FS = [string]$v.FileSystem; Size = [double]$v.Size; Free = [double]$v.SizeRemaining }
+    }
+  }
+  $out += [pscustomobject]@{ N = [string]$d.DeviceId; Name = [string]$d.FriendlyName; Media = [string]$d.MediaType;
+    Bus = [string]$d.BusType; Size = [double]$d.Size; Health = [string]$d.HealthStatus;
+    Op = (($d.OperationalStatus | ForEach-Object { [string]$_ }) -join ', ');
+    Temp = $c.Temperature; Hours = $c.PowerOnHours; Wear = $c.Wear;
+    RC = $c.ReadErrorsCorrected; RU = $c.ReadErrorsUncorrected; WU = $c.WriteErrorsUncorrected; Vols = $letras }
+}
+ConvertTo-Json -InputObject @($out) -Depth 4 -Compress
+"""
+
+    def _ps_capture(self, script, timeout=120):
+        """Roda um script PowerShell escondido e devolve o texto de saída."""
+        enc = base64.b64encode(script.encode("utf-16-le")).decode()
+        r = subprocess.run(["powershell", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-EncodedCommand", enc],
+                           capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=timeout,
+                           creationflags=subprocess.CREATE_NO_WINDOW)
+        return (r.stdout or "").strip()
+
+    @staticmethod
+    def _disk_kind(d):
+        media, bus = (d.get("Media") or "").upper(), (d.get("Bus") or "").upper()
+        if media == "SSD" or bus == "NVME":
+            return "SSD"
+        if media == "HDD":
+            return "HD"
+        return "Outro"
+
+    @staticmethod
+    def _disk_verdict(d):
+        """0 = Saudável, 1 = Atenção, 2 = Faça backup já. Devolve (nível, motivos)."""
+        nivel, motivos = 0, []
+        health, op = (d.get("Health") or "").lower(), (d.get("Op") or "").lower()
+        if health == "unhealthy" or "predictive" in op or "fail" in op:
+            nivel = 2; motivos.append("o Windows indica falha no disco")
+        elif health == "warning" or (op and op != "ok"):
+            nivel = max(nivel, 1); motivos.append(f"status do Windows: {d.get('Op') or d.get('Health')}")
+        erros = int(d.get("RU") or 0) + int(d.get("WU") or 0)
+        if erros:
+            nivel = 2; motivos.append(f"{erros} erro(s) de leitura/escrita não corrigido(s)")
+        wear = d.get("Wear")
+        if wear is not None:
+            if wear >= 90:
+                nivel = 2; motivos.append(f"desgaste do SSD em {wear}%")
+            elif wear >= 70:
+                nivel = max(nivel, 1); motivos.append(f"desgaste do SSD em {wear}%")
+        temp = d.get("Temp")
+        if temp:
+            limite = 55 if OtimizadorApp._disk_kind(d) == "HD" else 70
+            if temp >= limite:
+                nivel = max(nivel, 1); motivos.append(f"temperatura alta ({temp}°C)")
+        if OtimizadorApp._disk_kind(d) == "SSD":
+            for v in d.get("Vols") or []:
+                if v.get("Size") and v.get("Free", 0) / v["Size"] < 0.15:
+                    nivel = max(nivel, 1); motivos.append(f"{v['L']}: com menos de 15% livre (SSD cheio gasta mais rápido)")
+        return nivel, motivos
+
+    def create_view_disco(self, parent):
+        scroll = ctk.CTkScrollableFrame(parent, fg_color="transparent")
+
+        head = ctk.CTkFrame(scroll, fg_color="#151028", corner_radius=10)
+        head.pack(fill="x", pady=(0, 10), padx=2)
+        ctk.CTkLabel(head, text="💾 Saúde do Disco", font=ctk.CTkFont(size=16, weight="bold"),
+                     text_color="#FFFFFF").pack(anchor="w", padx=14, pady=(10, 2))
+        ctk.CTkLabel(head, text="Mede a saúde dos seus HDs e SSDs e ajuda eles a durarem mais. O desgaste físico não volta atrás:\n"
+                                "se um disco aparecer em Atenção ou pior, faça backup dos seus arquivos.",
+                     font=ctk.CTkFont(size=11), text_color="#9CA3AF", justify="left").pack(anchor="w", padx=14, pady=(0, 8))
+        ctk.CTkButton(head, text="🔍 Analisar discos", fg_color="#0E7490", hover_color="#155E75", height=36,
+                      font=ctk.CTkFont(weight="bold"),
+                      command=lambda: self.run_async(self.disk_health_scan, action_title="Analisando a Saúde dos Discos")
+                      ).pack(fill="x", padx=14, pady=(0, 12))
+
+        self.disk_list_frame = ctk.CTkFrame(scroll, fg_color="transparent")
+        self.disk_list_frame.pack(fill="x", padx=2)
+        ctk.CTkLabel(self.disk_list_frame, text="Clique em \"Analisar discos\" para ver seus discos aqui.",
+                     font=ctk.CTkFont(size=11), text_color="#6B7280").pack(anchor="w", padx=14, pady=6)
+        self.disk_checks = {}
+        self.disk_info = {}
+
+        acts = ctk.CTkFrame(scroll, fg_color="#181230", corner_radius=10, border_width=1, border_color="#0E7490")
+        acts.pack(fill="x", padx=2, pady=8)
+        ctk.CTkLabel(acts, text="Ações nos discos marcados", font=ctk.CTkFont(size=13, weight="bold"),
+                     text_color="#22D3EE").pack(anchor="w", padx=14, pady=(12, 2))
+        ctk.CTkLabel(acts, text="Prolongar vida útil: no SSD confere o TRIM e roda o ReTrim; no HD desfragmenta.\n"
+                                "Verificar setores (HD): procura erros e, se você quiser, agenda a correção completa no próximo boot,\n"
+                                "que isola setores ruins (pode demorar horas).",
+                     font=ctk.CTkFont(size=11), text_color="#9CA3AF", justify="left").pack(anchor="w", padx=14, pady=(0, 8))
+        ctk.CTkButton(acts, text="🛡️ Prolongar vida útil", fg_color="#047857", hover_color="#065F46", height=36,
+                      font=ctk.CTkFont(weight="bold"),
+                      command=lambda: self._run_on_selected_disks(self.disk_prolong_life, "Prolongando a Vida Útil dos Discos")
+                      ).pack(fill="x", padx=14, pady=3)
+        ctk.CTkButton(acts, text="🔎 Verificar setores (HD)", fg_color="#B45309", hover_color="#92400E", height=36,
+                      font=ctk.CTkFont(weight="bold"),
+                      command=lambda: self._run_on_selected_disks(self.disk_check_sectors, "Verificando Setores dos HDs")
+                      ).pack(fill="x", padx=14, pady=(3, 12))
+        return scroll
+
+    def _run_on_selected_disks(self, func, title):
+        marcados = [self.disk_info[n] for n, var in self.disk_checks.items() if var.get()]
+        if not self.disk_info:
+            messagebox.showinfo("Saúde do Disco", "Clique em \"Analisar discos\" primeiro.")
+            return
+        if not marcados:
+            messagebox.showinfo("Saúde do Disco", "Marque pelo menos um disco na lista.")
+            return
+        self.run_async(func, marcados, action_title=title)
+
+    def disk_health_scan(self):
+        self.log("💾 Analisando a saúde dos discos...")
+        self.set_hud_progress(20, "Lendo os discos físicos e os contadores de saúde...")
+        discos = []
+        try:
+            txt = self._ps_capture(self.DISK_SCAN_PS)
+            data = json.loads(txt) if txt else []
+            discos = data if isinstance(data, list) else [data]
+        except Exception as e:
+            self.log(f"  ⚠️ Leitura detalhada falhou ({e}); usando o modo simples (wmic).")
+        if not discos:
+            try:
+                r = subprocess.run(["wmic", "diskdrive", "get", "Index,Model,Status,Size", "/format:csv"], capture_output=True,
+                                   text=True, errors="replace", timeout=60, creationflags=subprocess.CREATE_NO_WINDOW)
+                for ln in r.stdout.splitlines():
+                    p = [x.strip() for x in ln.split(",")]
+                    if len(p) == 5 and p[1].isdigit():
+                        discos.append({"N": p[1], "Name": p[2], "Size": float(p[3] or 0), "Media": "", "Bus": "",
+                                       "Health": "Healthy" if p[4].upper() == "OK" else "Warning", "Op": p[4], "Vols": []})
+            except Exception as e:
+                self.log(f"  ❌ Não consegui ler os discos: {e}")
+        for d in discos:
+            d["Vols"] = d.get("Vols") or []
+            if isinstance(d["Vols"], dict):
+                d["Vols"] = [d["Vols"]]
+            nivel, motivos = self._disk_verdict(d)
+            d["_nivel"], d["_motivos"] = nivel, motivos
+            veredito = ["✅ Saudável", "⚠️ Atenção", "🛑 Faça backup já"][nivel]
+            letras = ", ".join(v["L"] + ":" for v in d["Vols"]) or "sem letra"
+            self.log(f"  {d.get('Name')} ({self._disk_kind(d)}, {letras}): {veredito}" + (f" — {'; '.join(motivos)}" if motivos else ""))
+        self.set_hud_progress(100, f"{len(discos)} disco(s) analisado(s).")
+        self.call_ui(lambda: self._render_disk_list(discos), wait=False)
+        risco = [d for d in discos if any("15% livre" not in m for m in d["_motivos"])]
+        cheios = [d for d in discos if d not in risco and d["_motivos"]]
+        if risco:
+            nomes = "\n".join(f"• {d.get('Name')}" for d in risco)
+            self.after(0, lambda: messagebox.showwarning("Saúde do Disco",
+                f"Estes discos mostram sinais de problema:\n{nomes}\n\nFaça backup dos seus arquivos importantes o quanto antes."))
+        elif cheios:
+            self.after(0, lambda: messagebox.showinfo("Saúde do Disco",
+                "Seus discos estão saudáveis, mas algum SSD está com menos de 15% livre.\n"
+                "SSD muito cheio gasta mais rápido: libere espaço quando puder."))
+
+    def _render_disk_list(self, discos):
+        for w in self.disk_list_frame.winfo_children():
+            w.destroy()
+        antigos = {n: v.get() for n, v in self.disk_checks.items()}
+        self.disk_checks, self.disk_info = {}, {}
+        cores = ["#10B981", "#F59E0B", "#EF4444"]
+        nomes = ["✅ Saudável", "⚠️ Atenção", "🛑 Faça backup já"]
+        for d in discos:
+            n = str(d.get("N"))
+            self.disk_info[n] = d
+            card = ctk.CTkFrame(self.disk_list_frame, fg_color="#181230", corner_radius=10, border_width=1,
+                                border_color=cores[d["_nivel"]])
+            card.pack(fill="x", pady=4)
+            topo = ctk.CTkFrame(card, fg_color="transparent")
+            topo.pack(fill="x", padx=12, pady=(10, 2))
+            var = tk.BooleanVar(value=antigos.get(n, False))
+            self.disk_checks[n] = var
+            tam = (d.get("Size") or 0) / 1e9
+            ctk.CTkCheckBox(topo, text=f"{d.get('Name')}  •  {self._disk_kind(d)} {d.get('Bus') or ''}  •  {tam:,.0f} GB".replace(",", "."),
+                            variable=var, font=ctk.CTkFont(size=12, weight="bold")).pack(side="left")
+            ctk.CTkLabel(topo, text=nomes[d["_nivel"]], font=ctk.CTkFont(size=12, weight="bold"),
+                         text_color=cores[d["_nivel"]]).pack(side="right")
+            info = []
+            letras = ", ".join(f"{v['L']}: ({v['Free'] / 1e9:,.0f} GB livres)".replace(",", ".") for v in d["Vols"] if v.get("Size"))
+            info.append(f"Partições: {letras or 'sem letra'}")
+            if d.get("Temp"):
+                info.append(f"Temperatura: {d['Temp']}°C")
+            if d.get("Hours") is not None:
+                info.append(f"Horas ligado: {d['Hours']:,}".replace(",", "."))
+            if d.get("Wear") is not None:
+                info.append(f"Desgaste: {d['Wear']}%")
+            if d.get("RC") is not None:
+                info.append(f"Erros de leitura: {d.get('RC') or 0} corrigidos / {d.get('RU') or 0} não corrigidos")
+            if d.get("Temp") is None and d.get("Hours") is None:
+                info.append("Este disco não informa temperatura/horas ao Windows")
+            ctk.CTkLabel(card, text="   •   ".join(info), font=ctk.CTkFont(size=11), text_color="#9CA3AF",
+                         wraplength=640, justify="left").pack(anchor="w", padx=40, pady=(0, 2))
+            if d["_motivos"]:
+                ctk.CTkLabel(card, text="Motivo: " + "; ".join(d["_motivos"]), font=ctk.CTkFont(size=11),
+                             text_color=cores[d["_nivel"]], wraplength=640, justify="left").pack(anchor="w", padx=40, pady=(0, 2))
+            ctk.CTkFrame(card, fg_color="transparent", height=6).pack()
+
+    def disk_prolong_life(self, discos):
+        self.log("🛡️ Prolongar vida útil nos discos marcados (não recupera desgaste: ajuda o disco a durar mais)...")
+        avisos, feitos = [], 0
+        total = max(1, len(discos))
+        trim_ok = None
+        for i, d in enumerate(discos):
+            nome, tipo = d.get("Name"), self._disk_kind(d)
+            base = int(i / total * 90) + 5
+            vols = [v for v in d["Vols"] if (v.get("FS") or "").upper() in ("NTFS", "REFS")]
+            if tipo == "SSD":
+                self.set_hud_progress(base, f"SSD {nome}: conferindo o TRIM...")
+                if trim_ok is None:
+                    r = subprocess.run("fsutil behavior query DisableDeleteNotify", shell=True, capture_output=True, text=True,
+                                       encoding="oem", errors="replace", creationflags=subprocess.CREATE_NO_WINDOW)
+                    trim_ok = "= 0" in (r.stdout or "").split("\n")[0]
+                    if not trim_ok:
+                        self.log("  TRIM estava desligado: ligando...")
+                        self.run_cmd_live("fsutil behavior set DisableDeleteNotify 0")
+                        trim_ok = True
+                    else:
+                        self.log("  ✅ TRIM já está ligado.")
+                for v in vols:
+                    self.set_hud_progress(base, f"SSD {nome}: ReTrim em {v['L']}:...")
+                    self.run_cmd_live(f'powershell -NoProfile -NonInteractive -Command "Optimize-Volume -DriveLetter {v["L"]} -ReTrim -Verbose"')
+                    if v.get("Size") and v.get("Free", 0) / v["Size"] < 0.15:
+                        avisos.append(f"{v['L']}: tem menos de 15% livre. SSD cheio gasta mais rápido: libere espaço.")
+                self.log(f"  ✅ {nome}: o Windows reconhece como SSD, então a manutenção agendada só faz TRIM (não desfragmenta).")
+                feitos += 1
+            elif tipo == "HD":
+                for v in vols:
+                    self.set_hud_progress(base, f"HD {nome}: desfragmentando {v['L']}: (pode demorar)...")
+                    self.run_cmd_live(f'powershell -NoProfile -NonInteractive -Command "Optimize-Volume -DriveLetter {v["L"]} -Defrag -Verbose"')
+                feitos += 1
+            else:
+                self.log(f"  ⏭️ {nome}: pen drive/disco externo não identificado como HD ou SSD; pulado por segurança.")
+            if any("15% livre" not in m for m in d.get("_motivos", [])):
+                avisos.append(f"{nome} está em {'Atenção' if d['_nivel'] == 1 else 'risco'}: faça backup dos arquivos importantes.")
+        self.set_hud_progress(100, "Pronto.")
+        msg = f"Concluído em {feitos} disco(s).\n\nIsso ajuda o disco a durar mais; o desgaste que já existe não volta atrás."
+        if avisos:
+            msg += "\n\nAtenção:\n• " + "\n• ".join(avisos)
+        self.after(0, lambda m=msg: messagebox.showinfo("Prolongar vida útil", m))
+
+    def _chkdsk_schedule_r(self, letra):
+        """Roda chkdsk X: /r respondendo às perguntas: não desmonta agora e agenda para o próximo boot.
+        Lê a letra de Sim/Não do próprio prompt (S/N, Y/N), então funciona em qualquer idioma.
+        Mantém um arquivo aberto no disco: com ele "em uso", o chkdsk oferece agendar em vez de
+        começar na hora (o que travaria o disco por horas)."""
+        trava_path = f"{letra}:\\bernal_chkdsk.tmp"
+        try:
+            trava = open(trava_path, "w")
+        except Exception:
+            trava = None
+        try:
+            return self._chkdsk_answer(letra)
+        finally:
+            if trava:
+                trava.close()
+                try:
+                    os.remove(trava_path)
+                except Exception:
+                    pass
+
+    def _chkdsk_answer(self, letra):
+        p = subprocess.Popen(["chkdsk", f"{letra}:", "/r"], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                             stderr=subprocess.STDOUT, creationflags=subprocess.CREATE_NO_WINDOW)
+        buf, linha = "", ""
+        while True:
+            ch = p.stdout.read(1)
+            if not ch:
+                break
+            c = ch.decode("cp850", "replace")
+            buf += c
+            linha = "" if c == "\n" else linha + c
+            if c == "\n" and buf.strip():
+                self.log("  " + buf.strip())
+                buf = ""
+            m = re.search(r"\((\w)/(\w)\)\s*\??\s*$", linha)
+            if m:
+                pergunta = linha.lower()
+                desmontar = "desmont" in pergunta or "dismount" in pergunta or "forç" in pergunta or "force" in pergunta
+                resp = m.group(2) if desmontar else m.group(1)
+                self.log("  " + linha.strip() + f" {resp}")
+                p.stdin.write((resp + "\r\n").encode()); p.stdin.flush()
+                linha, buf = "", ""
+        p.wait()
+        return p.returncode
+
+    def disk_check_sectors(self, discos):
+        hds = [d for d in discos if self._disk_kind(d) == "HD"]
+        for d in discos:
+            if d not in hds:
+                self.log(f"  ⏭️ {d.get('Name')}: não é HD; a verificação de setores é só para HD (o SSD faz isso sozinho).")
+        if not hds:
+            self.after(0, lambda: messagebox.showinfo("Verificar setores", "Nenhum HD marcado. Essa verificação é só para HD."))
+            return
+        letras = []
+        for i, d in enumerate(hds):
+            for v in d["Vols"]:
+                if (v.get("FS") or "").upper() != "NTFS":
+                    continue
+                self.set_hud_progress(int(i / len(hds) * 80) + 10, f"Procurando erros em {v['L']}: ({d.get('Name')})...")
+                self.log(f"🔎 Verificando {v['L']}: sem desligar o disco (chkdsk /scan)...")
+                self.run_cmd_live(f"chkdsk {v['L']}: /scan")
+                letras.append(v["L"])
+        self.set_hud_progress(95, "Verificação rápida concluída.")
+        if not letras:
+            self.after(0, lambda: messagebox.showinfo("Verificar setores", "Os HDs marcados não têm partição NTFS para verificar."))
+            return
+        agendar = self.call_ui(lambda: messagebox.askyesno("Verificação completa no próximo boot",
+            f"A verificação rápida terminou (veja o resultado na aba Log).\n\n"
+            f"Quer agendar a verificação completa de {', '.join(l + ':' for l in letras)} para o próximo reinício?\n"
+            "Ela procura setores ruins e isola eles para não serem mais usados.\n\n"
+            "⏳ Pode demorar HORAS e o PC fica nessa tela até terminar. Faça backup antes."))
+        if agendar:
+            for l in letras:
+                self.log(f"🗓️ Agendando chkdsk {l}: /r para o próximo reinício...")
+                self._chkdsk_schedule_r(l)
+            self.after(0, lambda: messagebox.showinfo("Agendado", "Verificação completa agendada. Ela roda quando você reiniciar o PC."))
+        self.set_hud_progress(100, "Pronto.")
 
     def create_view_bugs(self, parent):
         scroll = ctk.CTkScrollableFrame(parent, fg_color="transparent")

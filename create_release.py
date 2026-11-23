@@ -24,9 +24,10 @@ SETUP_NAME = f"Setup_Bernal_Otimizacoes_V{VERSION}.exe"
 
 # Novidades desta versão (troque a cada release)
 NOTES = """
-- 🔄 Atualização automática sem janela do CMD e com o app abrindo sozinho no fim.
-- 🏷️ Nome com a versão atual na pesquisa do Windows, no Menu Iniciar e em "Aplicativos instalados".
-- 🚀 Ajustes de estabilidade.
+- 💾 **Nova aba Saúde do Disco:** analisa todos os HDs e SSDs (saúde, temperatura, horas ligado, erros e desgaste) e mostra Saudável / Atenção / Faça backup já.
+- 🛡️ **Prolongar vida útil** nos discos que você marcar: TRIM/ReTrim no SSD e desfragmentação no HD.
+- 🔎 **Verificar setores (HD):** procura erros e pode agendar a correção completa no próximo boot.
+- Nada roda sozinho: só quando você clica.
 """
 
 FILES = [
