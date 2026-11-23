@@ -24,8 +24,7 @@ SETUP_NAME = f"Setup_Bernal_Otimizacoes_V{VERSION}.exe"
 
 # Novidades desta versão (troque a cada release)
 NOTES = """
-- 🛠️ **Reparo do Windows não trava mais na limpeza:** o passo 1/4 (Limpeza de Disco do Windows) tem limite de 10 minutos; se passar, o app segue sozinho para o SFC e o DISM.
-- 📊 A janela de progresso mostra em qual dos 4 passos o reparo está.
+- 🔌 **Licença e atualização mais resistentes:** se o servidor não responder no endereço guardado, o app busca o endereço atual na hora e tenta de novo sozinho (sem precisar esperar o cache de 5 minutos).
 """
 
 FILES = [

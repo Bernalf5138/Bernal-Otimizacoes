@@ -27,7 +27,7 @@ import hashlib
 import hmac
 import queue as _queue_mod
 
-APP_VERSION = "11.7"
+APP_VERSION = "11.8"
 
 # --------------------------------------------------------------------------
 # Senhas: nunca em texto puro no código. Para trocar uma senha, rode:
