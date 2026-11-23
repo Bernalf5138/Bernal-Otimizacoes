@@ -24,10 +24,8 @@ SETUP_NAME = f"Setup_Bernal_Otimizacoes_V{VERSION}.exe"
 
 # Novidades desta versão (troque a cada release)
 NOTES = """
-- 💾 **Nova aba Saúde do Disco:** analisa todos os HDs e SSDs (saúde, temperatura, horas ligado, erros e desgaste) e mostra Saudável / Atenção / Faça backup já.
-- 🛡️ **Prolongar vida útil** nos discos que você marcar: TRIM/ReTrim no SSD e desfragmentação no HD.
-- 🔎 **Verificar setores (HD):** procura erros e pode agendar a correção completa no próximo boot.
-- Nada roda sozinho: só quando você clica.
+- 🌎 **App em 3 idiomas:** Português, Español e English. Escolha no topo do app (🇧🇷 PT / 🇪🇸 ES / 🇺🇸 EN); o app reabre no idioma escolhido e lembra da escolha.
+- 💾 Saúde do Disco: o desgaste do SSD não aparece mais como 0% quando o Windows não informa o valor real, e HD não mostra desgaste.
 """
 
 FILES = [

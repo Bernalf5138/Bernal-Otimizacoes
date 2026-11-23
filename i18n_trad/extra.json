@@ -1,0 +1,66 @@
+{
+ "Desgaste: não informado pelo Windows (veja no CrystalDiskInfo)": [
+  "Desgaste: Windows no lo informa (míralo en CrystalDiskInfo)",
+  "Wear: not reported by Windows (check it in CrystalDiskInfo)"
+ ],
+ "Horas ligado: não informado pelo Windows": [
+  "Horas encendido: Windows no lo informa",
+  "Power-on hours: not reported by Windows"
+ ],
+ "🌐 Idioma alterado para {0}. Reiniciando o app...": [
+  "🌐 Idioma cambiado a {0}. Reiniciando la app...",
+  "🌐 Language changed to {0}. Restarting the app..."
+ ],
+ "Partições: {0}": [
+  "Particiones: {0}",
+  "Partitions: {0}"
+ ],
+ "Corrige automaticamente:\n• Menu Iniciar ou Barra de Tarefas travados/não abrindo\n• Lentidão no Explorer.exe e processos zumbis\n• Falha de conexão de rede, pilha WinSock e cache DNS": [
+  "Corrige automáticamente:\n• Menú Inicio o Barra de Tareas trabados/sin abrir\n• Lentitud en Explorer.exe y procesos zombis\n• Fallas de conexión de red, pila WinSock y caché DNS",
+  "Automatically fixes:\n• Start Menu or Taskbar frozen/not opening\n• Slow Explorer.exe and zombie processes\n• Network connection failures, WinSock stack and DNS cache"
+ ],
+ "Soluciona os crashes mais comuns do Warzone e jogos DirectX:\n• Erro 0x00001338 e falha na KERNELBASE.dll / cod.exe\n• Limpa Shader Cache corrompido e resets de DXCache/D3D\n• Calibra VideoMemoryScale (0.75) e RendererWorkerCount aos núcleos reais\n• Desativa conflito de Control Flow Guard (CFG) e DEP do Windows": [
+  "Soluciona los crashes más comunes de Warzone y juegos DirectX:\n• Error 0x00001338 y falla en KERNELBASE.dll / cod.exe\n• Limpia Shader Cache dañada y resets de DXCache/D3D\n• Calibra VideoMemoryScale (0.75) y RendererWorkerCount a los núcleos reales\n• Desactiva el conflicto de Control Flow Guard (CFG) y DEP de Windows",
+  "Fixes the most common Warzone and DirectX game crashes:\n• Error 0x00001338 and KERNELBASE.dll / cod.exe failure\n• Cleans corrupted Shader Cache and DXCache/D3D resets\n• Tunes VideoMemoryScale (0.75) and RendererWorkerCount to your real cores\n• Disables the Windows Control Flow Guard (CFG) and DEP conflict"
+ ],
+ "Escolha o .exe de qualquer jogo que não foi encontrado sozinho.": [
+  "Elige el .exe de cualquier juego que no se encontró solo.",
+  "Pick the .exe of any game that wasn't found automatically."
+ ],
+ "Esvazia as pastas temporárias do Windows (%TEMP% e Windows\\Temp). Não mexe no Prefetch.": [
+  "Vacía las carpetas temporales de Windows (%TEMP% y Windows\\Temp). No toca el Prefetch.",
+  "Empties Windows temp folders (%TEMP% and Windows\\Temp). Doesn't touch Prefetch."
+ ],
+ "Limpa %TEMP%, Windows\\Temp, Lixeira e cache de atualização do Windows.": [
+  "Limpia %TEMP%, Windows\\Temp, la Papelera y la caché de actualización de Windows.",
+  "Cleans %TEMP%, Windows\\Temp, the Recycle Bin and the Windows update cache."
+ ],
+ "Buscando atualizações de drivers pelo Windows Update e Winget. Por favor aguarde...": [
+  "Buscando actualizaciones de drivers en Windows Update y Winget. Por favor espera...",
+  "Looking for driver updates via Windows Update and Winget. Please wait..."
+ ],
+ "✅ Iniciando limpeza de arquivos temporários (%TEMP% e Windows\\Temp)...": [
+  "✅ Iniciando limpieza de archivos temporales (%TEMP% y Windows\\Temp)...",
+  "✅ Starting temporary file cleanup (%TEMP% and Windows\\Temp)..."
+ ],
+ "ℹ️ cod.exe não localizado — preferência de GPU não alterada": [
+  "ℹ️ cod.exe no encontrado — preferencia de GPU sin cambios",
+  "ℹ️ cod.exe not found — GPU preference unchanged"
+ ],
+ "⚠️ Winget indisponível ou recusado. Acionando instalador oficial direto para {0}": [
+  "⚠️ Winget no disponible o rechazado. Usando el instalador oficial directo para {0}",
+  "⚠️ Winget unavailable or refused. Using the official installer directly for {0}"
+ ],
+ "Chrome não encontrado. Instalando via winget...": [
+  "Chrome no encontrado. Instalando con winget...",
+  "Chrome not found. Installing with winget..."
+ ],
+ "Verificando {0}: {1}% concluído": [
+  "Verificando {0}: {1}% terminado",
+  "Checking {0}: {1}% done"
+ ],
+ "Verificando {0}: {1}% concluído (tempo estimado pelo Windows: {2}; ele recalcula durante a verificação)": [
+  "Verificando {0}: {1}% terminado (tiempo estimado por Windows: {2}; lo recalcula durante la verificación)",
+  "Checking {0}: {1}% done (time estimated by Windows: {2}; it recalculates during the check)"
+ ]
+}

@@ -16,13 +16,18 @@ import shutil
 import idiomas as lang
 import extras
 import bernal_cloud as cloud
+import i18n
+
+# Idioma escolhido pelo cliente (PT/ES/EN): os textos da tela passam pela tradução
+i18n.set_lang(i18n.idioma_salvo())
+i18n.install(ctk, messagebox)
 from PIL import Image, ImageTk
 import re
 import hashlib
 import hmac
 import queue as _queue_mod
 
-APP_VERSION = "11.4"
+APP_VERSION = "11.5"
 
 # --------------------------------------------------------------------------
 # Senhas: nunca em texto puro no código. Para trocar uma senha, rode:
@@ -356,7 +361,7 @@ class OtimizadorApp(ctk.CTk):
     def __init__(self):
         super().__init__()
         
-        self.current_lang = "pt"
+        self.current_lang = i18n.lang()
 
         self.title(f"Bernal Otimizações PRO - V{APP_VERSION}")
         sw = self.winfo_screenwidth()
@@ -660,6 +665,12 @@ class OtimizadorApp(ctk.CTk):
 
         def set_lang(l):
             self.current_lang = l
+            i18n.set_lang(l)
+            i18n.salvar_idioma(l)
+            try:
+                self.auth_window.title("Bernal Otimizações - Licença")
+            except Exception:
+                pass
             self.build_license_ui()
 
         ctk.CTkButton(lang_frame, text="🇧🇷 PT", width=40, height=25, fg_color="#27AE60", command=lambda: set_lang("pt")).pack(side="left", padx=2)
@@ -830,7 +841,7 @@ class OtimizadorApp(ctk.CTk):
         def _append():
             if hasattr(self, 'log_textbox') and self.log_textbox.winfo_exists():
                 self.log_textbox.configure(state="normal")
-                self.log_textbox.insert("end", f"[{time.strftime('%H:%M:%S')}] {message}\n")
+                self.log_textbox.insert("end", f"[{time.strftime('%H:%M:%S')}] {i18n.tr(str(message))}\n")
                 self.log_textbox.see("end")
                 self.log_textbox.configure(state="disabled")
             if hasattr(self, 'lbl_mini_status') and self.lbl_mini_status.winfo_exists():
@@ -977,7 +988,8 @@ class OtimizadorApp(ctk.CTk):
             self.log(f"❌ ERRO na operação '{title}'. Tire um print para o suporte técnico!")
             messagebox.showerror("Erro na Operação", f"❌ ERRO na operação '{title}'. Tire um print ou leia a Auditoria Secreta para enviar ao suporte técnico!")
 
-    def run_cmd_live(self, command):
+    def run_cmd_live(self, command, on_line=None):
+        """on_line(texto): opcional; se devolver True, a linha já foi tratada (não vai ao log/HUD)."""
         """Executes a command and streams its output to the live console without any popup window."""
         self.log(f"> {command}")
         try:
@@ -1012,6 +1024,8 @@ class OtimizadorApp(ctk.CTk):
                         if pct != last_pct[0]:
                             last_pct[0] = pct
                             self.log(f"  🔍 Verificando arquivos... {pct}%")
+                    continue
+                if on_line is not None and on_line(stripped):
                     continue
                 self.log(f"  {stripped}")
                 self._hud_message(stripped)
@@ -1379,6 +1393,16 @@ class OtimizadorApp(ctk.CTk):
         # Right buttons & status
         right_frame = ctk.CTkFrame(self.top_header_frame, fg_color="transparent")
         right_frame.pack(side="right", padx=14, pady=6)
+
+        # Seletor de idioma (salva e reabre o app no idioma escolhido)
+        lang_box = ctk.CTkFrame(right_frame, fg_color="transparent")
+        lang_box.pack(side="right", padx=(6, 0))
+        for code, rot in (("en", "🇺🇸 EN"), ("es", "🇪🇸 ES"), ("pt", "🇧🇷 PT")):
+            ativo = code == i18n.lang()
+            ctk.CTkButton(lang_box, text=rot, width=46, height=26, corner_radius=6,
+                          font=ctk.CTkFont(size=11, weight="bold"),
+                          fg_color="#7928CA" if ativo else "#1F1838", hover_color="#9333EA",
+                          command=lambda c=code: self.change_language(c)).pack(side="right", padx=2)
 
         # Online Safe Session Badge
         ctk.CTkLabel(
@@ -3923,6 +3947,10 @@ ConvertTo-Json -InputObject @($out) -Depth 4 -Compress
             d["Vols"] = d.get("Vols") or []
             if isinstance(d["Vols"], dict):
                 d["Vols"] = [d["Vols"]]
+            # O desgaste só existe em SSD. Muitos SSDs NVMe devolvem 0 ao Windows mesmo já gastos
+            # (o CrystalDiskInfo lê o valor real direto do SSD): 0 sem horas ligado = não informado.
+            if self._disk_kind(d) != "SSD" or (not d.get("Wear") and d.get("Hours") is None):
+                d["Wear"] = None
             nivel, motivos = self._disk_verdict(d)
             d["_nivel"], d["_motivos"] = nivel, motivos
             veredito = ["✅ Saudável", "⚠️ Atenção", "🛑 Faça backup já"][nivel]
@@ -3972,10 +4000,12 @@ ConvertTo-Json -InputObject @($out) -Depth 4 -Compress
                 info.append(f"Horas ligado: {d['Hours']:,}".replace(",", "."))
             if d.get("Wear") is not None:
                 info.append(f"Desgaste: {d['Wear']}%")
+            elif self._disk_kind(d) == "SSD":
+                info.append("Desgaste: não informado pelo Windows (veja no CrystalDiskInfo)")
             if d.get("RC") is not None:
                 info.append(f"Erros de leitura: {d.get('RC') or 0} corrigidos / {d.get('RU') or 0} não corrigidos")
-            if d.get("Temp") is None and d.get("Hours") is None:
-                info.append("Este disco não informa temperatura/horas ao Windows")
+            if d.get("Hours") is None:
+                info.append("Horas ligado: não informado pelo Windows")
             ctk.CTkLabel(card, text="   •   ".join(info), font=ctk.CTkFont(size=11), text_color="#9CA3AF",
                          wraplength=640, justify="left").pack(anchor="w", padx=40, pady=(0, 2))
             if d["_motivos"]:
@@ -4086,7 +4116,26 @@ ConvertTo-Json -InputObject @($out) -Depth 4 -Compress
                     continue
                 self.set_hud_progress(int(i / len(hds) * 80) + 10, f"Procurando erros em {v['L']}: ({d.get('Name')})...")
                 self.log(f"🔎 Verificando {v['L']}: sem desligar o disco (chkdsk /scan)...")
-                self.run_cmd_live(f"chkdsk {v['L']}: /scan")
+                ini, fatia = int(i / len(hds) * 80) + 10, 80 / len(hds)
+                ultimo = [-1]
+
+                def progresso(linha, L=v["L"], ini=ini, fatia=fatia, ultimo=ultimo):
+                    # Linha de andamento do chkdsk (PT/ES/EN): "... Total: 16%; ... estimado ...: 0:19:18"
+                    m = re.search(r"Total:\s*(\d+)\s*%", linha)
+                    if not m:
+                        return False
+                    pct = int(m.group(1))
+                    eta = re.search(r"(\d+:\d{2}:\d{2})\s*\.?\s*$", linha)
+                    msg = f"Verificando {L}: {pct}% concluído"
+                    if eta:
+                        msg += f" (tempo estimado pelo Windows: {eta.group(1)}; ele recalcula durante a verificação)"
+                    self.set_hud_progress(ini + int(pct / 100 * fatia), None)
+                    self._hud_message(msg)
+                    if pct // 10 != ultimo[0]:        # no log, só a cada 10%
+                        ultimo[0] = pct // 10
+                        self.log(f"  {msg}")
+                    return True
+                self.run_cmd_live(f"chkdsk {v['L']}: /scan", on_line=progresso)
                 letras.append(v["L"])
         self.set_hud_progress(95, "Verificação rápida concluída.")
         if not letras:
@@ -4465,7 +4514,7 @@ ConvertTo-Json -InputObject @($out) -Depth 4 -Compress
             t_lbl = ctk.CTkLabel(row, text=f"⏰ {item.get('time', '')}", font=ctk.CTkFont(size=10, weight="bold"), text_color="#F59E0B")
             t_lbl.pack(side="left", padx=(6, 4))
             
-            lbl_name = item.get('label', '')
+            lbl_name = i18n.tr(item.get('label', ''))   # traduz antes de cortar (alarmes padrão vêm em PT)
             if len(lbl_name) > 16:
                 lbl_name = lbl_name[:15] + ".."
             m_lbl = ctk.CTkLabel(row, text=lbl_name, font=ctk.CTkFont(size=9), text_color="#E2E8F0")
@@ -5053,6 +5102,32 @@ ConvertTo-Json -InputObject @($out) -Depth 4 -Compress
             messagebox.showwarning("Recurso PRO", "Esta função é exclusiva da versão PRO.\nAdquira uma licença para liberar todo o poder do Otimizador!")
             return
         self.run_async(func, *args)
+
+    def change_language(self, code):
+        """Salva o idioma e reabre o app nele (os textos são montados ao abrir)."""
+        if code == i18n.lang():
+            return
+        avisos = {
+            "pt": ("Idioma", "O app vai reiniciar em português. Continuar?"),
+            "es": ("Idioma", "La app se reiniciará en español. ¿Continuar?"),
+            "en": ("Language", "The app will restart in English. Continue?"),
+        }
+        titulo, texto = avisos[code]
+        # Pergunta já no idioma novo: Message vai direto ao Tk, sem passar pela tradução do idioma atual
+        import tkinter.messagebox as _tkmb
+        if _tkmb.Message(title=titulo, message=texto, icon="question", type="yesno").show() != "yes":
+            return
+        i18n.salvar_idioma(code)
+        self.log(f"🌐 Idioma alterado para {code.upper()}. Reiniciando o app...")
+        try:
+            if getattr(sys, 'frozen', False):
+                cloud.launch_restart_script(["cmd.exe", "/c", f'ping 127.0.0.1 -n 3 >nul & start "" "{sys.executable}"'])
+            else:
+                subprocess.Popen([sys.executable, os.path.abspath(__file__)], creationflags=subprocess.CREATE_NO_WINDOW)
+        except Exception as e:
+            messagebox.showerror("Erro", f"❌ Ocorreu um erro: {e}")
+            return
+        self.after(200, lambda: os._exit(0))
 
     def prompt_admin(self, event=None):
         from tkinter import messagebox

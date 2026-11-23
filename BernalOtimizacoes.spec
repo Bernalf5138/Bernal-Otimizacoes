@@ -80,7 +80,7 @@ a = Analysis(
         ('thumb_WP_Retro_Fighter.png', '.'),
         ('thumb_WP_Retro_Synthwave.png', '.')
     ],
-    hiddenimports=['idiomas','extras','bernal_cloud','cryptography.hazmat.primitives.asymmetric.ed25519','cryptography.hazmat.primitives.ciphers.aead'],
+    hiddenimports=['idiomas','extras','bernal_cloud','i18n','traducoes_data','cryptography.hazmat.primitives.asymmetric.ed25519','cryptography.hazmat.primitives.ciphers.aead'],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
