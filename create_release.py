@@ -24,8 +24,7 @@ SETUP_NAME = f"Setup_Bernal_Otimizacoes_V{VERSION}.exe"
 
 # Novidades desta versão (troque a cada release)
 NOTES = """
-- 🌎 **App em 3 idiomas:** Português, Español e English. Escolha no topo do app (🇧🇷 PT / 🇪🇸 ES / 🇺🇸 EN); o app reabre no idioma escolhido e lembra da escolha.
-- 💾 Saúde do Disco: o desgaste do SSD não aparece mais como 0% quando o Windows não informa o valor real, e HD não mostra desgaste.
+- 🗕 **Janela de progresso com botão minimizar (—):** vira uma barrinha no canto da tela com a porcentagem. Clique em ⬜ (ou dois cliques) para abrir de novo. As próximas operações já começam minimizadas.
 """
 
 FILES = [

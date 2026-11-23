@@ -27,7 +27,7 @@ import hashlib
 import hmac
 import queue as _queue_mod
 
-APP_VERSION = "11.5"
+APP_VERSION = "11.6"
 
 # --------------------------------------------------------------------------
 # Senhas: nunca em texto puro no código. Para trocar uma senha, rode:
@@ -257,9 +257,15 @@ class ToolTip:
             self.tooltip_window = None
 
 class CyberProgressHUD(ctk.CTkToplevel):
-    """Modal futurista com porcentagem e barra de progresso exibido ao clicar em ações."""
+    """Modal futurista com porcentagem e barra de progresso exibido ao clicar em ações.
+    O botão "—" encolhe para uma barrinha no canto da tela; a escolha vale para as próximas operações."""
+    _prefer_mini = False      # o cliente minimizou: as próximas operações já começam minimizadas
+
     def __init__(self, parent, title="Executando Operação...", initial_msg="Iniciando processamento..."):
         super().__init__(parent)
+        self._mini_on = False
+        self._pct_txt = "..."
+        self._title_tr = i18n.tr(title)
         self.overrideredirect(True)
         self.attributes("-topmost", True)
         self.configure(fg_color="#090514")
@@ -276,14 +282,18 @@ class CyberProgressHUD(ctk.CTkToplevel):
         except Exception:
             x, y = 300, 200
         self.geometry(f"{w}x{h}+{x}+{y}")
-        
+        self._full_geo = f"{w}x{h}+{x}+{y}"
+
         b = ctk.CTkFrame(self, fg_color="#100B24", corner_radius=12, border_width=2, border_color="#00D2FF")
         b.pack(fill="both", expand=True, padx=2, pady=2)
+        self._full = b
         
         t_row = ctk.CTkFrame(b, fg_color="transparent")
         t_row.pack(fill="x", padx=18, pady=(16, 6))
         
         ctk.CTkLabel(t_row, text="⚡ BERNAL PRO • PROCESSANDO", font=ctk.CTkFont(size=11, weight="bold"), text_color="#00D2FF").pack(side="left")
+        ctk.CTkButton(t_row, text="—", width=30, height=26, corner_radius=6, fg_color="#1F1838", hover_color="#2E2550",
+                      font=ctk.CTkFont(size=14, weight="bold"), command=self.minimize).pack(side="right", padx=(10, 0))
         self.lbl_pct = ctk.CTkLabel(t_row, text="0%", font=ctk.CTkFont(family="Consolas", size=24, weight="bold"), text_color="#00D2FF")
         self.lbl_pct.pack(side="right")
         
@@ -301,12 +311,65 @@ class CyberProgressHUD(ctk.CTkToplevel):
         bot.pack(fill="x", padx=18, pady=(0, 10))
         ctk.CTkLabel(bot, text="🛡️ Ponto de restauração criado ao abrir o app • Veja detalhes no Log", font=ctk.CTkFont(size=9), text_color="#6B7280").pack(side="left")
 
+        # Versão minimizada: barrinha no canto inferior direito
+        self.mini = ctk.CTkFrame(self, fg_color="#100B24", corner_radius=10, border_width=2, border_color="#00D2FF")
+        m_row = ctk.CTkFrame(self.mini, fg_color="transparent")
+        m_row.pack(fill="x", padx=10, pady=(6, 2))
+        self.lbl_mini = ctk.CTkLabel(m_row, text="", font=ctk.CTkFont(size=11, weight="bold"), text_color="#E2E8F0", anchor="w")
+        self.lbl_mini.pack(side="left", fill="x", expand=True)
+        ctk.CTkButton(m_row, text="⬜", width=28, height=22, corner_radius=6, fg_color="#1F1838", hover_color="#2E2550",
+                      command=self.restore).pack(side="right")
+        self.mini_bar = ctk.CTkProgressBar(self.mini, height=6, corner_radius=3, progress_color="#00D2FF", fg_color="#1A1238")
+        self.mini_bar.pack(fill="x", padx=10, pady=(0, 8))
+        self.mini_bar.set(0)
+        for w_ in (self.mini, m_row, self.lbl_mini):
+            w_.bind("<Double-Button-1>", lambda e: self.restore())
+
         # Sem porcentagem real ainda: barra animada (indeterminada) em vez de números inventados
         self._determinate = False
         self.lbl_pct.configure(text="...")
         try:
             self.bar.configure(mode="indeterminate")
             self.bar.start()
+            self.mini_bar.configure(mode="indeterminate")
+            self.mini_bar.start()
+        except Exception:
+            pass
+        self._refresh_mini()
+        if CyberProgressHUD._prefer_mini:
+            self.after(10, self.minimize)
+
+    def _refresh_mini(self):
+        try:
+            t = self._title_tr if len(self._title_tr) <= 34 else self._title_tr[:33] + "…"
+            self.lbl_mini.configure(text=f"⚡ {t}  •  {self._pct_txt}")
+        except Exception:
+            pass
+
+    def minimize(self):
+        """Encolhe para a barrinha no canto (e lembra a escolha para as próximas operações)."""
+        try:
+            CyberProgressHUD._prefer_mini = True
+            if self._mini_on:
+                return
+            self._mini_on = True
+            self._full.pack_forget()
+            self.mini.pack(fill="both", expand=True, padx=2, pady=2)
+            sw, sh = self.winfo_screenwidth(), self.winfo_screenheight()
+            w, h = 330, 62
+            self.geometry(f"{w}x{h}+{sw - w - 16}+{sh - h - 60}")
+        except Exception:
+            pass
+
+    def restore(self):
+        try:
+            CyberProgressHUD._prefer_mini = False
+            if not self._mini_on:
+                return
+            self._mini_on = False
+            self.mini.pack_forget()
+            self._full.pack(fill="both", expand=True, padx=2, pady=2)
+            self.geometry(self._full_geo)
         except Exception:
             pass
 
@@ -317,11 +380,16 @@ class CyberProgressHUD(ctk.CTkToplevel):
                 try:
                     self.bar.stop()
                     self.bar.configure(mode="determinate")
+                    self.mini_bar.stop()
+                    self.mini_bar.configure(mode="determinate")
                 except Exception:
                     pass
             p = max(0, min(100, int(pct)))
             self.bar.set(p / 100.0)
+            self.mini_bar.set(p / 100.0)
             self.lbl_pct.configure(text=f"{p}%")
+            self._pct_txt = f"{p}%"
+            self._refresh_mini()
             if msg:
                 self.lbl_msg.configure(text=msg)
         except Exception:
@@ -340,9 +408,14 @@ class CyberProgressHUD(ctk.CTkToplevel):
                 try:
                     self.bar.stop()
                     self.bar.configure(mode="determinate")
+                    self.mini_bar.stop()
+                    self.mini_bar.configure(mode="determinate")
                 except Exception:
                     pass
             self.bar.set(1.0)
+            self.mini_bar.set(1.0)
+            self._pct_txt = "OK" if ok else "!"
+            self._refresh_mini()
             self.lbl_pct.configure(text="OK" if ok else "!")
             self.lbl_msg.configure(text=msg)
             color = "#10B981" if ok else "#F59E0B"
