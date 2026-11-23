@@ -24,7 +24,8 @@ SETUP_NAME = f"Setup_Bernal_Otimizacoes_V{VERSION}.exe"
 
 # Novidades desta versão (troque a cada release)
 NOTES = """
-- 🗕 **Janela de progresso com botão minimizar (—):** vira uma barrinha no canto da tela com a porcentagem. Clique em ⬜ (ou dois cliques) para abrir de novo. As próximas operações já começam minimizadas.
+- 🛠️ **Reparo do Windows não trava mais na limpeza:** o passo 1/4 (Limpeza de Disco do Windows) tem limite de 10 minutos; se passar, o app segue sozinho para o SFC e o DISM.
+- 📊 A janela de progresso mostra em qual dos 4 passos o reparo está.
 """
 
 FILES = [

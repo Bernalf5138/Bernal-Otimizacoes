@@ -84,8 +84,26 @@ def tr(s):
 
 def _traduz(s):
     nucleo = s.strip()
-    if nucleo != s and nucleo in _exato:
-        return s.replace(nucleo, _exato[nucleo], 1)
+    if nucleo != s:
+        # Recuo/espaços nas pontas (comum no log): traduz o miolo e devolve os espaços
+        t = _exato.get(nucleo)
+        if t is None:
+            t = _modelo(nucleo)
+        if t is not None:
+            return s.replace(nucleo, t.strip(), 1)
+    t = _modelo(s)
+    if t is not None:
+        return t
+    if "\n" in s:
+        partes = s.split("\n")
+        trad = [tr(p) for p in partes]
+        if trad != partes:
+            return "\n".join(trad)
+    return s
+
+
+def _modelo(s):
+    """Tradução pelos modelos com {0}, {1}... ou None."""
     for _, rx, ordem, modelo in _modelos:
         m = rx.fullmatch(s)
         if m:
@@ -94,13 +112,8 @@ def _traduz(s):
                 return modelo.replace("{{", "\x01").replace("}}", "\x02").format(
                     *[valores.get(i, "") for i in range(max(ordem) + 1)]).replace("\x01", "{").replace("\x02", "}")
             except Exception:
-                return s
-    if "\n" in s:
-        partes = s.split("\n")
-        trad = [tr(p) for p in partes]
-        if trad != partes:
-            return "\n".join(trad)
-    return s
+                return None
+    return None
 
 
 def install(ctk, messagebox):

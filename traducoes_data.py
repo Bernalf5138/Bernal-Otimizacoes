@@ -1188,7 +1188,15 @@ ES = {
 "⚠️ Winget indisponível ou recusado. Acionando instalador oficial direto para {0}": "⚠️ Winget no disponible o rechazado. Usando el instalador oficial directo para {0}",
 "Chrome não encontrado. Instalando via winget...": "Chrome no encontrado. Instalando con winget...",
 "Verificando {0}: {1}% concluído": "Verificando {0}: {1}% terminado",
-"Verificando {0}: {1}% concluído (tempo estimado pelo Windows: {2}; ele recalcula durante a verificação)": "Verificando {0}: {1}% terminado (tiempo estimado por Windows: {2}; lo recalcula durante la verificación)"
+"Verificando {0}: {1}% concluído (tempo estimado pelo Windows: {2}; ele recalcula durante a verificação)": "Verificando {0}: {1}% terminado (tiempo estimado por Windows: {2}; lo recalcula durante la verificación)",
+"2/4: Procurando e reparando arquivos vitais (SFC)...": "2/4: Buscando y reparando archivos vitales (SFC)...",
+"3/4: Reparando imagem do sistema (DISM RestoreHealth)...": "3/4: Reparando la imagen del sistema (DISM RestoreHealth)...",
+"4/4: Limpeza profunda de componentes de atualização...": "4/4: Limpieza profunda de componentes de actualización...",
+"Limpeza de Disco do Windows (cleanmgr)": "Liberador de espacio de Windows (cleanmgr)",
+"⏭️ {0} passou de {1} min sem terminar e foi encerrado; seguindo para o próximo passo.": "⏭️ {0} pasó de {1} min sin terminar y se cerró; siguiendo con el próximo paso.",
+"⚠️ Não consegui iniciar {0}: {1}": "⚠️ No pude iniciar {0}: {1}",
+"✅ {0} terminou em {1}s.": "✅ {0} terminó en {1}s.",
+"1/4: Limpando Cache do Windows (até {0} min)...": "1/4: Limpiando la Caché de Windows (hasta {0} min)..."
 }
 EN = {
 "\n\nAtenção:\n• ": "\n\nAttention:\n• ",
@@ -2379,5 +2387,13 @@ EN = {
 "⚠️ Winget indisponível ou recusado. Acionando instalador oficial direto para {0}": "⚠️ Winget unavailable or refused. Using the official installer directly for {0}",
 "Chrome não encontrado. Instalando via winget...": "Chrome not found. Installing with winget...",
 "Verificando {0}: {1}% concluído": "Checking {0}: {1}% done",
-"Verificando {0}: {1}% concluído (tempo estimado pelo Windows: {2}; ele recalcula durante a verificação)": "Checking {0}: {1}% done (time estimated by Windows: {2}; it recalculates during the check)"
+"Verificando {0}: {1}% concluído (tempo estimado pelo Windows: {2}; ele recalcula durante a verificação)": "Checking {0}: {1}% done (time estimated by Windows: {2}; it recalculates during the check)",
+"2/4: Procurando e reparando arquivos vitais (SFC)...": "2/4: Finding and repairing vital files (SFC)...",
+"3/4: Reparando imagem do sistema (DISM RestoreHealth)...": "3/4: Repairing the system image (DISM RestoreHealth)...",
+"4/4: Limpeza profunda de componentes de atualização...": "4/4: Deep cleanup of update components...",
+"Limpeza de Disco do Windows (cleanmgr)": "Windows Disk Cleanup (cleanmgr)",
+"⏭️ {0} passou de {1} min sem terminar e foi encerrado; seguindo para o próximo passo.": "⏭️ {0} ran over {1} min without finishing and was closed; moving on to the next step.",
+"⚠️ Não consegui iniciar {0}: {1}": "⚠️ I couldn't start {0}: {1}",
+"✅ {0} terminou em {1}s.": "✅ {0} finished in {1}s.",
+"1/4: Limpando Cache do Windows (até {0} min)...": "1/4: Cleaning the Windows Cache (up to {0} min)..."
 }

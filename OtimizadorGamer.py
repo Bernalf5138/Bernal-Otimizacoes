@@ -27,7 +27,7 @@ import hashlib
 import hmac
 import queue as _queue_mod
 
-APP_VERSION = "11.6"
+APP_VERSION = "11.7"
 
 # --------------------------------------------------------------------------
 # Senhas: nunca em texto puro no código. Para trocar uma senha, rode:
@@ -6891,11 +6891,49 @@ ConvertTo-Json -InputObject @($out) -Depth 4 -Compress
         self.run_cmd_live('powershell -Command "powercfg /setactive SCHEME_CURRENT"')
         self.log("✅ Sistema configurado para acionar as ventoinhas mais cedo!")
 
+    CLEANMGR_LIMITE_S = 600   # 10 min: o cleanmgr não mostra progresso e às vezes fica parado escondido
+
+    def _run_with_timeout(self, args, limite_s, nome):
+        """Roda um programa escondido; se passar do limite, encerra ele (e os filhos) e segue."""
+        self.log(f"> {' '.join(args)}")
+        try:
+            p = subprocess.Popen(args, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                                 creationflags=subprocess.CREATE_NO_WINDOW)
+        except Exception as e:
+            self.log(f"  ⚠️ Não consegui iniciar {nome}: {e}")
+            return False
+        t0 = time.time()
+        while p.poll() is None:
+            if time.time() - t0 > limite_s:
+                subprocess.run(["taskkill", "/F", "/T", "/PID", str(p.pid)], capture_output=True,
+                               creationflags=subprocess.CREATE_NO_WINDOW)
+                self.log(f"  ⏭️ {nome} passou de {limite_s // 60} min sem terminar e foi encerrado; seguindo para o próximo passo.")
+                return False
+            time.sleep(1)
+        self.log(f"  ✅ {nome} terminou em {int(time.time() - t0)}s.")
+        return True
+
     def fix_corrupted_files(self):
+        titulo = "Reparo Profundo e Limpeza do Windows"
         self.log("🛠️ Iniciando Reparo Completo do Windows...")
-        cmd = 'echo 1/4: Limpando Cache do Windows... & cleanmgr /sagerun:1 & echo. & echo 2/4: Procurando e reparando arquivos vitais (SFC)... & sfc /scannow & echo. & echo 3/4: Reparando imagem do sistema (DISM RestoreHealth)... & DISM /Online /Cleanup-Image /RestoreHealth & echo. & echo 4/4: Limpeza profunda de componentes de atualizacao... & DISM /Online /Cleanup-Image /StartComponentCleanup'
-        self.run_visible_cmd("Reparo Profundo e Limpeza do Windows", cmd)
-        self.log("✅ Varredura, Reparo e Limpeza Profunda de Disco concluídos com sucesso!")
+        self.log(f"Iniciando Operação: {titulo}")
+        # 1/4: limpeza com limite de tempo (antes, se o cleanmgr travasse, o reparo parava para sempre)
+        self.set_hud_progress(5, f"1/4: Limpando Cache do Windows (até {self.CLEANMGR_LIMITE_S // 60} min)...")
+        self._run_with_timeout(["cleanmgr", "/sagerun:1"], self.CLEANMGR_LIMITE_S, "Limpeza de Disco do Windows (cleanmgr)")
+        self.set_hud_progress(25, "2/4: Procurando e reparando arquivos vitais (SFC)...")
+        self.run_cmd_live("sfc /scannow")
+        self.set_hud_progress(55, "3/4: Reparando imagem do sistema (DISM RestoreHealth)...")
+        ok = self.run_cmd_live("DISM /Online /Cleanup-Image /RestoreHealth")
+        self.set_hud_progress(85, "4/4: Limpeza profunda de componentes de atualização...")
+        ok = self.run_cmd_live("DISM /Online /Cleanup-Image /StartComponentCleanup") and ok
+        self.set_hud_progress(100, "Pronto.")
+        if ok:
+            self.log(f"✅ SUCESSO: '{titulo}' concluído!")
+            self.log("✅ Varredura, Reparo e Limpeza Profunda de Disco concluídos com sucesso!")
+            self.after(0, lambda: messagebox.showinfo("Operação Concluída", f"✅ '{titulo}' concluído com sucesso!"))
+        else:
+            self.log(f"❌ ERRO na operação '{titulo}'. Tire um print para o suporte técnico!")
+            self.after(0, lambda: messagebox.showerror("Erro na Operação", f"❌ ERRO na operação '{titulo}'. Tire um print ou leia a Auditoria Secreta para enviar ao suporte técnico!"))
 
     def install_gpu_app(self):
         self.log("Analisando Placa de Vídeo do Cliente...")
